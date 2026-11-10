@@ -1,0 +1,29 @@
+name: crypto_tracker
+description: "CryptoTracker: a live crypto market tracker, the Dart Streams showcase."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.5
+
+# Each package is added in the phase that first needs it, and its purpose is
+# recorded in the README's tech stack.
+dependencies:
+  flutter:
+    sdk: flutter
+  get_it: ^9.3.0
+  go_router: ^18.1.4
+  injectable: ^3.0.0
+  material_ui: ^1.11.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.16.1
+  go_router_builder: ^4.5.3
+  injectable_generator: ^3.1.3
+
+flutter:
+  uses-material-design: true
