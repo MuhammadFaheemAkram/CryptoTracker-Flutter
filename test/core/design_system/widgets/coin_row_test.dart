@@ -5,32 +5,85 @@ import 'package:material_ui/material_ui.dart';
 import '../../../helpers/pump_app.dart';
 
 void main() {
-  Widget bitcoin({VoidCallback? onTap, Widget? trailing, String? name}) =>
-      ListView(
-        children: [
-          CoinRow(
-            rank: 1,
-            symbol: 'btc',
-            name: name ?? 'Bitcoin',
-            price: r'$67,240.50',
-            change24hPercent: 2.41,
-            onTap: onTap,
-            trailing: trailing,
-          ),
-        ],
-      );
+  Widget bitcoin({
+    VoidCallback? onTap,
+    Widget? trailing,
+    String? name,
+    List<double>? sparkline,
+  }) => ListView(
+    children: [
+      CoinRow(
+        rank: 1,
+        symbol: 'btc',
+        name: name ?? 'Bitcoin',
+        price: r'$67,240.50',
+        change24hPercent: 2.41,
+        sparkline: sparkline,
+        onTap: onTap,
+        trailing: trailing,
+      ),
+    ],
+  );
 
-  testWidgets('shows the rank, badge, name, symbol, price and change', (
+  testWidgets('shows the badge, name, rank with symbol, price and change', (
     tester,
   ) async {
     await tester.pumpThemed(bitcoin());
 
-    expect(find.text('1'), findsOneWidget);
     expect(find.byType(CoinBadge), findsOneWidget);
     expect(find.text('Bitcoin'), findsOneWidget);
-    expect(find.text('BTC'), findsNWidgets(2)); // the line and the badge
+    expect(find.text('#1 · BTC'), findsOneWidget);
     expect(find.text(r'$67,240.50'), findsOneWidget);
     expect(find.text('+2.41%'), findsOneWidget);
+  });
+
+  group('the sparkline', () {
+    const week = [1.0, 2.0, 1.5, 3.0];
+
+    testWidgets('shows between the name and the price on a phone', (
+      tester,
+    ) async {
+      tester.usePhoneSurface();
+      await tester.pumpThemed(bitcoin(sparkline: week));
+
+      final line = tester.getCenter(find.byType(Sparkline));
+      expect(line.dx, greaterThan(tester.getCenter(find.text('Bitcoin')).dx));
+      expect(line.dx, lessThan(tester.getCenter(find.text(r'$67,240.50')).dx));
+    });
+
+    testWidgets('is left out on a row too narrow for it', (tester) async {
+      tester.view
+        ..physicalSize = const Size(320 * 3, 800 * 3)
+        ..devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpThemed(bitcoin(sparkline: week));
+
+      expect(find.byType(Sparkline), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('is left out at large text', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      addTearDown(tester.platformDispatcher.clearAllTestValues);
+      tester.usePhoneSurface();
+
+      await tester.pumpThemed(bitcoin(sparkline: week));
+
+      expect(find.byType(Sparkline), findsNothing);
+    });
+
+    testWidgets('is not part of what a screen reader hears', (tester) async {
+      final handle = tester.ensureSemantics();
+      tester.usePhoneSurface();
+      await tester.pumpThemed(bitcoin(sparkline: week, onTap: () {}));
+
+      expect(
+        find.bySemanticsLabel(r'Bitcoin, BTC, rank 1, $67,240.50, Up 2.41%'),
+        findsOneWidget,
+      );
+      handle.dispose();
+    });
   });
 
   testWidgets('a tap anywhere on it calls onTap', (tester) async {
@@ -113,8 +166,7 @@ void main() {
   });
 
   group('large text', () {
-    testWidgets('above 130 % everything goes under the name, and the rank '
-        'joins the symbol', (tester) async {
+    testWidgets('above 130 % everything goes under the name', (tester) async {
       tester.platformDispatcher.textScaleFactorTestValue = 1.5;
       addTearDown(tester.platformDispatcher.clearAllTestValues);
       tester.usePhoneSurface();

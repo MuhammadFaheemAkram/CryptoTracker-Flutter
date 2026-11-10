@@ -46,8 +46,8 @@ Built in **strict, reviewable phases**. Each phase ends with:
 | Phase | Scope | Status |
 |------:|-------|:------:|
 | 1 | Foundation: the project, the design system (market colors, `CoinBadge`, `CoinRow`), typed routes and the 4-tab shell, CI | ✅ Done |
-| 2 | Models, the bundled seed and a static Market (sort, search) | ⏳ Next |
-| 3 | **Live prices with Dart streams:** the `PriceTicker`, the five-input pipeline, debounce, `scan` flashes, the price history | ⬜ |
+| 2 | Models, the bundled seed and a static Market (sort, search, sparklines) | ✅ Done |
+| 3 | **Live prices with Dart streams:** the `PriceTicker`, the five-input pipeline, debounce, `scan` flashes, the price history | ⏳ Next |
 | 4 | Watchlist (drift v1) and Coin Detail with a hand-drawn live chart | ⬜ |
 | 5 | Portfolio with live valuation (drift v2), the allocation donut, the holding form | ⬜ |
 | 6 | Settings (currency, interval, appearance), the documentation set, the release check | ⬜ |
@@ -76,11 +76,14 @@ Built in **strict, reviewable phases**. Each phase ends with:
 | DI | `get_it` + `injectable` | Constructor injection, generated wiring (the Hilt equivalent) | 1 |
 | Codegen | `build_runner` | Routes and DI are generated; generated files are committed | 1 |
 | State | `flutter_bloc` (Cubits) | Each Cubit subscribes to its pipeline and emits immutable states | 2 |
+| Models | `freezed` + `json_serializable` | Immutable models with value equality; checked DTOs | 2 |
+| Formatting | `intl` | Prices in each currency, significant digits under one unit, compact amounts | 2 |
+| Time | `clock` | An injectable "now" (fixed in tests) | 2 |
 | **Streams** | **Dart `Stream` + `rxdart`** | `BehaviorSubject`, `combineLatest`, `debounceTime`, `scan`, `switchMap` | 3 |
 | Database | `drift` | The watchlist and holdings, observed as streams | 4 |
 | Charts | `CustomPainter` | Hand-drawn sparkline, line chart and donut | 3–5 |
 
-The rest arrive with their phase (`freezed`, `json_serializable`, `intl`, `shared_preferences`, `clock`, `package_info_plus`; tests: `bloc_test`, `fake_async`, `async`'s `StreamQueue`).
+The rest arrive with their phase (`shared_preferences`, `package_info_plus`; tests: `async`'s `StreamQueue`). Tests so far use `flutter_test`, `bloc_test`, `mocktail` and `fake_async`.
 
 ---
 
@@ -111,15 +114,20 @@ lib/
 ├── main.dart                     # configureDependencies(), runApp
 ├── app/                          # CryptoTrackerApp (MaterialApp.router, themes)
 ├── core/
-│   ├── design_system/            # AppTheme, AppColors (up/down/flat + flashes), tokens, widgets/
-│   ├── formatting/               # PercentFormatter (money formatters in Phase 2)
-│   └── navigation/               # typed routes, the router, the Close fallback
-├── domain/model/                 # PriceDirection (pure Dart)
-├── di/                           # injection.dart (+ the generated config)
+│   ├── common/                   # Result, AppException
+│   ├── design_system/            # AppTheme, AppColors, tokens, widgets/ (CoinRow, CoinBadge, …), charts/ (Sparkline)
+│   ├── formatting/               # MoneyFormatter, PercentFormatter (pure Dart)
+│   ├── navigation/               # typed routes, the router, the Close fallback
+│   └── network/                  # MarketApi, FakeMarketApi, AssetJsonLoader, dto/
+├── data/                         # mappers (checked), MarketRepositoryImpl (load once)
+├── domain/                       # models, pipeline/ (buildMarketRows), repository contracts, use cases
+├── di/                           # injection.dart, AppModule
 └── features/
     ├── shell/                    # the 4-tab NavigationBar
-    └── market/ watchlist/ portfolio/ settings/ coin_detail/ holding_form/   # placeholders for now
-test/                             # mirrors lib/; helpers/ (pump helpers, the app harness, contrast)
+    ├── market/                   # MarketCubit, MarketState, MarketPage, MarketView
+    └── watchlist/ portfolio/ settings/ coin_detail/ holding_form/   # placeholders for now
+assets/json/                      # coins_seed.json (the iOS edition's), exchange_rates.json
+test/                             # mirrors lib/; helpers/ (fixtures, fakes, the app harness, contrast)
 ```
 
 ---
@@ -143,24 +151,48 @@ fvm flutter test
 
 ---
 
+## 🌐 The fake market service and the data
+
+- **No backend:**
+  - `FakeMarketApi` answers from bundled JSON after 600 ms per request;
+  - the repository asks for the coins and the rates at once, so the first screen waits about that long;
+  - a real HTTP client could replace it behind `MarketApi` without changing a caller.
+- **The seed** is the iOS edition's `coins_seed.json`:
+  - 32 coins, with prices sent **as strings**, as many market APIs do;
+  - a 24-point 7-day sparkline and the all-time high;
+  - plus `is_stablecoin` for USDT, USDC and DAI.
+- **`exchange_rates.json`** holds fixed demo rates per dollar.
+- **Checked on the way in:**
+  - every value is parsed and validated by the mappers (a positive price, a change above −100 %, a rate for every currency);
+  - one damaged record fails the load, and the Market offers "Try again".
+- **Loaded once:**
+  - the repository keeps the first success, shares a load already in flight, and tries again after a failure;
+  - from Phase 3 the prices move on the ticker, not by reloading.
+- **Money is US dollars** everywhere below the UI. A currency is applied only when a value is formatted (and, from Phase 5, when a buy price is typed).
+
+---
+
 ## 🧪 Testing
 
 - **The design system:**
   - every text color (up, down, flat, body, secondary) reaches WCAG AA on every surface it sits on, including both flashes, in both themes;
   - `CoinBadge`'s letters reach AA on every hue (white or black, whichever contrasts more);
   - `CoinRow` is one button for screen readers, stacks above 130 % text, and cuts a long name, never the price.
-- **Formatting:** the sign and the arrow always agree (checked across every rounding boundary from −3 % to +3 %).
+- **Formatting:** the sign and the arrow always agree (checked across every rounding boundary from −3 % to +3 %); prices under one unit keep four significant digits; every currency converts.
+- **The data:** the bundled seed (32 coins, ranks 1–32, exactly three stablecoins); mappers that reject every damaged value; a repository that loads once, shares a load in flight, retries after a failure, and lets bugs through.
+- **The Market:** `buildMarketRows` (search × sort, ties by rank); the Cubit with `bloc_test`; the view in every state with `MockCubit`; flows on the real DI graph.
 - **Navigation:** the tabs, a coin above them, the holding form as a full-screen dialog, deep links with Close, encoded ids, not found.
 - **The accessibility tour:** every screen, light and dark, at 200 % text.
 - **Architecture rules:** the domain and the formatters are plain Dart; the design system knows no screens; screens never reach the data layer; `getIt` only where the conventions allow it.
 
-**144 tests** after Phase 1.
+**252 tests** after Phase 2.
 
 ---
 
 ## 📚 Docs
 
 - [Phase 1 summary](docs/PHASE_1_SUMMARY.md): the foundation, the market colors and their contrast, `CoinBadge` and `CoinRow`, the routes
+- [Phase 2 summary](docs/PHASE_2_SUMMARY.md): the models (a derived 24 h change), the seed, checked mappers, a repository that loads once, the static Market
 
 `docs/STREAM_PIPELINES.md` (every pipeline as a marble diagram, with a Flow ↔ Combine ↔ Dart table) arrives with Phase 3.
 
@@ -174,7 +206,7 @@ Phase 6 collects them.
 
 ## 🗺️ Roadmap
 
-Phases 2–6 above. Later: a real price feed (a WebSocket) behind the same stream, price alerts, transactions instead of holdings.
+Phases 3–6 above. Later: a real price feed (a WebSocket) behind the same stream, price alerts, transactions instead of holdings.
 
 ---
 

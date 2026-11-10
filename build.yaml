@@ -1,10 +1,16 @@
 targets:
   $default:
     builders:
+      json_serializable:
+        options:
+          # Every DTO checks its JSON: a wrong type names the field instead
+          # of failing somewhere later. Fields are snake_case on the wire.
+          checked: true
+          field_rename: snake
       source_gen:combining_builder:
         options:
-          # Lint headers for generated parts (go_router_builder now; freezed,
-          # json_serializable and drift later), so generated files can stay
-          # inside the analyzer's scope and still report compile errors.
+          # Lint headers for generated parts (go_router_builder, freezed,
+          # json_serializable; drift from Phase 4), so generated files can
+          # stay inside the analyzer's scope and still report compile errors.
           ignore_for_file:
             - type=lint

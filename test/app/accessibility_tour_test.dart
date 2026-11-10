@@ -1,8 +1,13 @@
+import 'dart:async';
+
+import 'package:crypto_tracker/core/common/app_exception.dart';
+import 'package:crypto_tracker/core/network/market_api.dart';
 import 'package:crypto_tracker/di/injection.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../helpers/app_harness.dart';
+import '../helpers/fakes/scripted_market_api.dart';
 
 // Every screen, in light and dark, with text at 200 %: no layout overflows
 // (an overflow fails the test), tap targets of at least 48 × 48, a label on
@@ -13,6 +18,41 @@ void main() {
 
   for (final brightness in Brightness.values) {
     group('${brightness.name} theme, text at 200 %', () {
+      Future<void> open(
+        WidgetTester tester,
+        String location, {
+        MarketApi? marketApi,
+        bool settle = true,
+      }) async {
+        tester.platformDispatcher
+          ..textScaleFactorTestValue = 2
+          ..platformBrightnessTestValue = brightness;
+        addTearDown(tester.platformDispatcher.clearAllTestValues);
+        await pumpCryptoTracker(
+          tester,
+          initialLocation: location,
+          marketApi: marketApi,
+          settle: settle,
+        );
+        // Phone width, but tall enough to lay out every item of a long
+        // list: the checks see only what is built.
+        tester.view.physicalSize = const Size(390 * 3, 6000 * 3);
+        settle
+            ? await tester.pumpAndSettle()
+            : await tester.pump(const Duration(milliseconds: 100));
+        final context = tester.element(find.byType(Scaffold).last);
+        expect(MediaQuery.textScalerOf(context).scale(10), 20);
+        expect(Theme.of(context).brightness, brightness);
+      }
+
+      Future<void> expectAccessible(WidgetTester tester) async {
+        final handle = tester.ensureSemantics();
+        await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        handle.dispose();
+      }
+
       for (final (name, location) in [
         ('Market', '/market'),
         ('Watchlist', '/watchlist'),
@@ -24,26 +64,46 @@ void main() {
         ('Page not found', '/nowhere'),
       ]) {
         testWidgets(name, (tester) async {
-          tester.platformDispatcher
-            ..textScaleFactorTestValue = 2
-            ..platformBrightnessTestValue = brightness;
-          addTearDown(tester.platformDispatcher.clearAllTestValues);
-          await pumpCryptoTracker(tester, initialLocation: location);
-          // Phone width, but tall enough to lay out every item of a long
-          // list: the checks see only what is built.
-          tester.view.physicalSize = const Size(390 * 3, 6000 * 3);
-          await tester.pumpAndSettle();
-          final context = tester.element(find.byType(Scaffold).last);
-          expect(MediaQuery.textScalerOf(context).scale(10), 20);
-          expect(Theme.of(context).brightness, brightness);
-
-          final handle = tester.ensureSemantics();
-          await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
-          await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
-          await expectLater(tester, meetsGuideline(textContrastGuideline));
-          handle.dispose();
+          await open(tester, location);
+          await expectAccessible(tester);
         });
       }
+
+      testWidgets('Market, loading', (tester) async {
+        await open(
+          tester,
+          '/market',
+          marketApi: ScriptedMarketApi()..gate = Completer<void>(),
+          settle: false,
+        );
+        expect(find.text('Loading the market…'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Market, failed', (tester) async {
+        await open(
+          tester,
+          '/market',
+          marketApi: ScriptedMarketApi()..failure = const NetworkException(),
+        );
+        expect(find.text('Try again'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Market, nothing matches', (tester) async {
+        await open(tester, '/market');
+        await tester.enterText(find.byType(TextField), 'zzz');
+        await tester.pumpAndSettle();
+        expect(find.text('No coins match “zzz”'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Market, the sort menu open', (tester) async {
+        await open(tester, '/market');
+        await tester.tap(find.byTooltip('Sort by rank'));
+        await tester.pumpAndSettle();
+        await expectAccessible(tester);
+      });
     });
   }
 

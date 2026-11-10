@@ -1,3 +1,4 @@
+import 'package:crypto_tracker/core/design_system/charts/sparkline.dart';
 import 'package:crypto_tracker/core/design_system/large_text.dart';
 import 'package:crypto_tracker/core/design_system/theme/app_spacing.dart';
 import 'package:crypto_tracker/core/design_system/widgets/coin_badge.dart';
@@ -5,12 +6,16 @@ import 'package:crypto_tracker/core/design_system/widgets/price_change_badge.dar
 import 'package:crypto_tracker/core/formatting/percent_formatter.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// One coin in a list (the Market, the Watchlist): rank, badge, name and
-/// symbol, the price and its 24 h change.
+/// One coin in a list (the Market, the Watchlist): badge, name, rank and
+/// symbol, an optional 7-day sparkline, the price and its 24 h change.
 ///
 /// It only renders: the caller formats [price] (in the chosen currency) and
-/// decides what a tap does. Later phases add the flash when the price ticks,
-/// the 7-day sparkline and the watchlist star (as [trailing]).
+/// decides what a tap does. Later phases add the flash when the price ticks
+/// (Phase 3) and the watchlist star (Phase 4, as [trailing]).
+///
+/// The rank sits with the symbol ("#1 · BTC") rather than in a column of its
+/// own: on a phone, a rank column, the sparkline, the price and the star
+/// would leave a name about 40 points.
 ///
 /// For a screen reader, the row is one button that says everything
 /// ("Bitcoin, BTC, rank 1, $67,240.50, Up 2.41%"); the [trailing] control
@@ -23,6 +28,7 @@ class CoinRow extends StatelessWidget {
     required this.name,
     required this.price,
     required this.change24hPercent,
+    this.sparkline,
     this.onTap,
     this.trailing,
   });
@@ -37,6 +43,10 @@ class CoinRow extends StatelessWidget {
 
   /// The change over 24 h, in percent.
   final double change24hPercent;
+
+  /// Recent prices, oldest first (the last 7 days). Hidden at large text and
+  /// on very narrow rows.
+  final List<double>? sparkline;
 
   final VoidCallback? onTap;
 
@@ -90,60 +100,75 @@ class _SideBySide extends StatelessWidget {
   final CoinRow row;
   final String symbol;
 
+  /// Below this width the sparkline would squeeze the name: it goes.
+  static const sparklineMinWidth = 340.0;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
-      children: [
-        SizedBox(
-          width: 28,
-          child: Text(
-            '${row.rank}',
-            textAlign: TextAlign.end,
-            style: _tabular(theme.textTheme.bodySmall)
-                .copyWith(color: theme.colorScheme.onSurfaceVariant),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.small),
-        CoinBadge(symbol: row.symbol),
-        const SizedBox(width: AppSpacing.small),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                row.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium,
-              ),
-              Text(
-                symbol,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+    final sparkline = row.sparkline;
+    return LayoutBuilder(
+      builder: (context, constraints) => Row(
+        children: [
+          CoinBadge(symbol: row.symbol),
+          const SizedBox(width: AppSpacing.small),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  row.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium,
                 ),
+                _RankAndSymbol(row: row, symbol: symbol),
+              ],
+            ),
+          ),
+          if (sparkline != null &&
+              constraints.maxWidth >= sparklineMinWidth) ...[
+            const SizedBox(width: AppSpacing.small),
+            Sparkline(points: sparkline, size: const Size(56, 28)),
+          ],
+          const SizedBox(width: AppSpacing.small),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(row.price, style: _tabular(theme.textTheme.titleMedium)),
+              PriceChangeBadge(
+                percent: row.change24hPercent,
+                style: theme.textTheme.bodySmall,
               ),
             ],
           ),
-        ),
-        const SizedBox(width: AppSpacing.small),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(row.price, style: _tabular(theme.textTheme.titleMedium)),
-            PriceChangeBadge(
-              percent: row.change24hPercent,
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
+    );
+  }
+}
+
+/// "#1 · BTC", quieter than the name.
+class _RankAndSymbol extends StatelessWidget {
+  const _RankAndSymbol({required this.row, required this.symbol});
+
+  final CoinRow row;
+  final String symbol;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      '#${row.rank} · $symbol',
+      style: _tabular(theme.textTheme.bodySmall)
+          .copyWith(color: theme.colorScheme.onSurfaceVariant),
     );
   }
 }
 
 /// Large text (above 130 %): everything under the name, so a long price
-/// never squeezes the name to a few letters. The rank joins the symbol.
+/// never squeezes the name to a few letters. No sparkline: it would be a
+/// line too small to read next to text this large.
 class _Stacked extends StatelessWidget {
   const _Stacked({required this.row, required this.symbol});
 
@@ -163,12 +188,7 @@ class _Stacked extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(row.name, style: theme.textTheme.titleMedium),
-              Text(
-                '#${row.rank} · $symbol',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              _RankAndSymbol(row: row, symbol: symbol),
               Text(row.price, style: _tabular(theme.textTheme.titleMedium)),
               PriceChangeBadge(
                 percent: row.change24hPercent,

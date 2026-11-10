@@ -1,0 +1,10 @@
+{
+  "base": "USD",
+  "note": "Fixed, illustrative rates for the demo: not live market data.",
+  "rates": {
+    "USD": 1,
+    "EUR": 0.92,
+    "GBP": 0.79,
+    "JPY": 151.2
+  }
+}

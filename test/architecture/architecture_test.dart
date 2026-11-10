@@ -39,8 +39,7 @@ void main() {
       "'package:material_ui/",
       "'package:flutter_bloc/",
       "'package:get_it/",
-      "'package:injectable/",
-      'crypto_tracker/core/',
+      "'package:json_annotation/",
       'crypto_tracker/data/',
       'crypto_tracker/di/',
       'crypto_tracker/features/',
@@ -51,6 +50,10 @@ void main() {
         reason: forbidden,
       );
     }
+    // From core, only the shared vocabulary (`Result`, `AppException`).
+    // `injectable` annotations are plain Dart, and allowed on use cases.
+    final core = RegExp(r'crypto_tracker/core/(?!common/)');
+    expect(filesContaining(core, among: domain), isEmpty);
   });
 
   test('the formatters are plain Dart too (tested without widgets)', () {
@@ -93,6 +96,31 @@ void main() {
         reason: forbidden,
       );
     }
+  });
+
+  test('only the data layer and the DI root know the network: DTOs never '
+      'reach the domain or the screens', () {
+    final outside = sources.where(
+      (file) =>
+          !file.path.startsWith('lib/core/network/') &&
+          !file.path.startsWith('lib/data/') &&
+          !file.path.startsWith('lib/di/'),
+    );
+    expect(
+      filesContaining('crypto_tracker/core/network/', among: outside),
+      isEmpty,
+    );
+  });
+
+  test('state management stays in the screens (and the app)', () {
+    bool allowed(File file) =>
+        file.path.startsWith('lib/features/') ||
+        file.path.startsWith('lib/app/');
+    final elsewhere = sources.where((file) => !allowed(file));
+    expect(
+      filesContaining("'package:flutter_bloc/", among: elsewhere),
+      isEmpty,
+    );
   });
 
   test('the service locator is touched only by main, the app, the DI root '

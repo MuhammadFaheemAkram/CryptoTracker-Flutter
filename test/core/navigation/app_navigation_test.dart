@@ -43,7 +43,7 @@ void main() {
     ) async {
       await pumpCryptoTracker(tester);
 
-      await tester.tapAndSettle(find.text('Open Bitcoin'));
+      await tester.tapAndSettle(find.text('Bitcoin'));
       expect(appBarTitled('Coin'), findsOneWidget);
       expect(find.text('Coin "bitcoin"'), findsOneWidget);
       expect(find.byType(NavigationBar), findsNothing);
