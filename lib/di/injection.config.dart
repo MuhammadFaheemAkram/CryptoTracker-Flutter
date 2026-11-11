@@ -14,6 +14,7 @@ import 'dart:math' as _i407;
 
 import 'package:clock/clock.dart' as _i454;
 import 'package:crypto_tracker/core/database/app_database.dart' as _i36;
+import 'package:crypto_tracker/core/database/daos/portfolio_dao.dart' as _i486;
 import 'package:crypto_tracker/core/database/daos/watchlist_dao.dart' as _i576;
 import 'package:crypto_tracker/core/network/asset_json_loader.dart' as _i223;
 import 'package:crypto_tracker/core/network/fake_market_api.dart' as _i771;
@@ -26,6 +27,8 @@ import 'package:crypto_tracker/core/storage/settings_local_data_source.dart'
     as _i406;
 import 'package:crypto_tracker/data/repository/market_repository_impl.dart'
     as _i434;
+import 'package:crypto_tracker/data/repository/portfolio_repository_impl.dart'
+    as _i56;
 import 'package:crypto_tracker/data/repository/settings_repository_impl.dart'
     as _i937;
 import 'package:crypto_tracker/data/repository/watchlist_repository_impl.dart'
@@ -33,6 +36,8 @@ import 'package:crypto_tracker/data/repository/watchlist_repository_impl.dart'
 import 'package:crypto_tracker/di/app_module.dart' as _i799;
 import 'package:crypto_tracker/domain/repository/market_repository.dart'
     as _i847;
+import 'package:crypto_tracker/domain/repository/portfolio_repository.dart'
+    as _i125;
 import 'package:crypto_tracker/domain/repository/settings_repository.dart'
     as _i782;
 import 'package:crypto_tracker/domain/repository/watchlist_repository.dart'
@@ -41,19 +46,29 @@ import 'package:crypto_tracker/domain/usecase/load_market_use_case.dart'
     as _i54;
 import 'package:crypto_tracker/domain/usecase/observe_coin_detail_use_case.dart'
     as _i11;
+import 'package:crypto_tracker/domain/usecase/observe_coin_price_use_case.dart'
+    as _i646;
 import 'package:crypto_tracker/domain/usecase/observe_market_use_case.dart'
     as _i524;
+import 'package:crypto_tracker/domain/usecase/observe_portfolio_use_case.dart'
+    as _i561;
 import 'package:crypto_tracker/domain/usecase/observe_price_moves_use_case.dart'
     as _i128;
 import 'package:crypto_tracker/domain/usecase/observe_watchlist_rows_use_case.dart'
     as _i171;
+import 'package:crypto_tracker/domain/usecase/portfolio_use_cases.dart'
+    as _i1003;
 import 'package:crypto_tracker/domain/usecase/settings_use_cases.dart' as _i13;
 import 'package:crypto_tracker/domain/usecase/watchlist_use_cases.dart'
     as _i301;
 import 'package:crypto_tracker/features/coin_detail/cubit/coin_detail_cubit.dart'
     as _i16;
+import 'package:crypto_tracker/features/holding_form/cubit/holding_form_cubit.dart'
+    as _i55;
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart'
     as _i428;
+import 'package:crypto_tracker/features/portfolio/cubit/portfolio_cubit.dart'
+    as _i651;
 import 'package:crypto_tracker/features/watchlist/cubit/watchlist_cubit.dart'
     as _i137;
 import 'package:flutter/services.dart' as _i281;
@@ -101,8 +116,17 @@ extension GetItInjectableX on _i174.GetIt {
     gh.lazySingleton<_i576.WatchlistDao>(
       () => appModule.watchlistDao(gh<_i36.AppDatabase>()),
     );
+    gh.lazySingleton<_i486.PortfolioDao>(
+      () => appModule.portfolioDao(gh<_i36.AppDatabase>()),
+    );
     gh.lazySingleton<_i253.MarketApi>(
       () => _i771.FakeMarketApi(gh<_i223.AssetJsonLoader>()),
+    );
+    gh.lazySingleton<_i125.PortfolioRepository>(
+      () => _i56.PortfolioRepositoryImpl(
+        gh<_i486.PortfolioDao>(),
+        gh<_i454.Clock>(),
+      ),
     );
     gh.lazySingleton<_i501.TickerScheduler>(
       () => _i501.TickerScheduler(
@@ -113,6 +137,9 @@ extension GetItInjectableX on _i174.GetIt {
     );
     gh.factory<_i13.ObserveSettingsUseCase>(
       () => _i13.ObserveSettingsUseCase(gh<_i782.SettingsRepository>()),
+    );
+    gh.factory<_i13.CurrentSettingsUseCase>(
+      () => _i13.CurrentSettingsUseCase(gh<_i782.SettingsRepository>()),
     );
     gh.factory<_i13.SetLivePricesPausedUseCase>(
       () => _i13.SetLivePricesPausedUseCase(gh<_i782.SettingsRepository>()),
@@ -131,8 +158,26 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i454.Clock>(),
       ),
     );
+    gh.factory<_i1003.FindHoldingUseCase>(
+      () => _i1003.FindHoldingUseCase(gh<_i125.PortfolioRepository>()),
+    );
+    gh.factory<_i1003.AddHoldingUseCase>(
+      () => _i1003.AddHoldingUseCase(gh<_i125.PortfolioRepository>()),
+    );
+    gh.factory<_i1003.UpdateHoldingUseCase>(
+      () => _i1003.UpdateHoldingUseCase(gh<_i125.PortfolioRepository>()),
+    );
+    gh.factory<_i1003.RemoveHoldingUseCase>(
+      () => _i1003.RemoveHoldingUseCase(gh<_i125.PortfolioRepository>()),
+    );
+    gh.factory<_i1003.RestoreHoldingUseCase>(
+      () => _i1003.RestoreHoldingUseCase(gh<_i125.PortfolioRepository>()),
+    );
     gh.factory<_i54.LoadMarketUseCase>(
       () => _i54.LoadMarketUseCase(gh<_i847.MarketRepository>()),
+    );
+    gh.factory<_i646.ObserveCoinPriceUseCase>(
+      () => _i646.ObserveCoinPriceUseCase(gh<_i847.MarketRepository>()),
     );
     gh.factory<_i128.ObservePriceMovesUseCase>(
       () => _i128.ObservePriceMovesUseCase(gh<_i847.MarketRepository>()),
@@ -163,6 +208,13 @@ extension GetItInjectableX on _i174.GetIt {
     gh.factory<_i301.RestoreWatchedCoinUseCase>(
       () => _i301.RestoreWatchedCoinUseCase(gh<_i585.WatchlistRepository>()),
     );
+    gh.factory<_i561.ObservePortfolioUseCase>(
+      () => _i561.ObservePortfolioUseCase(
+        gh<_i128.ObservePriceMovesUseCase>(),
+        gh<_i125.PortfolioRepository>(),
+        gh<_i782.SettingsRepository>(),
+      ),
+    );
     gh.factory<_i11.ObserveCoinDetailUseCase>(
       () => _i11.ObserveCoinDetailUseCase(
         gh<_i128.ObservePriceMovesUseCase>(),
@@ -187,12 +239,32 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i301.ToggleWatchUseCase>(),
       ),
     );
+    gh.factoryParam<_i55.HoldingFormCubit, String?, int?>(
+      (coinId, holdingId) => _i55.HoldingFormCubit(
+        coinId,
+        holdingId,
+        gh<_i54.LoadMarketUseCase>(),
+        gh<_i1003.FindHoldingUseCase>(),
+        gh<_i1003.AddHoldingUseCase>(),
+        gh<_i1003.UpdateHoldingUseCase>(),
+        gh<_i646.ObserveCoinPriceUseCase>(),
+        gh<_i13.CurrentSettingsUseCase>(),
+      ),
+    );
     gh.factory<_i137.WatchlistCubit>(
       () => _i137.WatchlistCubit(
         gh<_i54.LoadMarketUseCase>(),
         gh<_i171.ObserveWatchlistRowsUseCase>(),
         gh<_i301.RemoveFromWatchlistUseCase>(),
         gh<_i301.RestoreWatchedCoinUseCase>(),
+      ),
+    );
+    gh.factory<_i651.PortfolioCubit>(
+      () => _i651.PortfolioCubit(
+        gh<_i54.LoadMarketUseCase>(),
+        gh<_i561.ObservePortfolioUseCase>(),
+        gh<_i1003.RemoveHoldingUseCase>(),
+        gh<_i1003.RestoreHoldingUseCase>(),
       ),
     );
     return this;

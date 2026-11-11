@@ -36,6 +36,11 @@ abstract final class PercentFormatter {
     };
   }
 
+  /// A share of a whole, from hundredths of a percent: 5237 → "52.37%".
+  /// Whole numbers in, so the shares a screen lists add up to exactly
+  /// 100.00% (Correctness Rule 10).
+  static String formatShare(int basisPoints) => '${_twoDecimals(basisPoints)}%';
+
   /// 241 → "2.41". Built from whole hundredths rather than
   /// `toStringAsFixed`, so the rounding is exactly the one above.
   static String _twoDecimals(int hundredths) {

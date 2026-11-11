@@ -4,6 +4,7 @@ import 'package:crypto_tracker/core/common/app_exception.dart';
 import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/core/network/market_api.dart';
 import 'package:crypto_tracker/di/injection.dart';
+import 'package:crypto_tracker/domain/repository/portfolio_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -25,6 +26,7 @@ void main() {
         MarketApi? marketApi,
         bool settle = true,
         bool livePrices = false,
+        bool tall = true,
       }) async {
         tester.platformDispatcher
           ..textScaleFactorTestValue = 2
@@ -38,8 +40,10 @@ void main() {
           livePrices: livePrices,
         );
         // Phone width, but tall enough to lay out every item of a long
-        // list: the checks see only what is built.
-        tester.view.physicalSize = const Size(390 * 3, 6000 * 3);
+        // list: the checks see only what is built. Not under a dialog: a
+        // page beneath one is snapshotted for its transition, and a picture
+        // that tall can't be rasterized.
+        if (tall) tester.view.physicalSize = const Size(390 * 3, 6000 * 3);
         settle
             ? await tester.pumpAndSettle()
             : await tester.pump(const Duration(milliseconds: 100));
@@ -164,6 +168,71 @@ void main() {
         expect(find.byTooltip('Remove Bitcoin from watchlist'), findsOneWidget);
         expect(find.textContaining('over 7 days'), findsWidgets);
         expect(find.byType(PausedChip), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      /// Three holdings, so the donut, the legend and the rows all show.
+      Future<void> addHoldings(WidgetTester tester) async {
+        for (final (coin, amount) in [
+          ('bitcoin', 0.5),
+          ('ethereum', 4.0),
+          ('tether', 1000.0),
+        ]) {
+          await tester.write(
+            () => getIt<PortfolioRepository>().add(
+              coinId: coin,
+              amount: amount,
+              buyPriceUsd: 1,
+            ),
+          );
+        }
+      }
+
+      testWidgets('Portfolio, holdings and the Undo bar', (tester) async {
+        await open(tester, '/portfolio');
+        await addHoldings(tester);
+        expect(find.byType(AllocationDonut), findsOneWidget);
+        await tester.drag(
+          find.byType(PositionTile).first,
+          const Offset(-600, 0),
+        );
+        await tester.pump();
+        await tester.settleRealAsync();
+        expect(find.text('Undo'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Holding form, every error showing', (tester) async {
+        await open(tester, '/holdings/new');
+        await tester.enterText(find.byType(TextField).first, '0');
+        await tester.tapAndSettle(find.text('Save'));
+        expect(find.text('Choose a coin'), findsOneWidget);
+        expect(find.text('Must be more than 0'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Holding form, the coin picker open', (tester) async {
+        await open(tester, '/holdings/new');
+        await tester.tapAndSettle(find.text('Coin'));
+        expect(find.text('Choose a coin'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Holding form, editing, and the discard question', (
+        tester,
+      ) async {
+        await open(tester, '/portfolio', tall: false);
+        await addHoldings(tester);
+        // Not `.first` while nothing is built: it throws instead of
+        // matching nothing.
+        final bitcoin = find.text(r'Cost $0.50');
+        await tester.scrollTo(bitcoin);
+        await tester.tapAndSettle(bitcoin);
+        expect(find.text('Edit holding'), findsOneWidget);
+        await tester.enterText(find.byType(TextField).first, '2');
+        await tester.pumpAndSettle(); // the change shows before Close
+        await tester.tapAndSettle(find.byType(CloseButton));
+        expect(find.text('Discard changes?'), findsOneWidget);
         await expectAccessible(tester);
       });
 

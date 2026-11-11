@@ -60,4 +60,11 @@ void main() {
       expect(PercentFormatter.describeChange(double.nan), 'Change unknown');
     });
   });
+
+  test('a share, from hundredths of a percent', () {
+    expect(PercentFormatter.formatShare(5237), '52.37%');
+    expect(PercentFormatter.formatShare(10000), '100.00%');
+    expect(PercentFormatter.formatShare(5), '0.05%');
+    expect(PercentFormatter.formatShare(0), '0.00%');
+  });
 }

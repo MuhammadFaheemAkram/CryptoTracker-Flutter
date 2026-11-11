@@ -95,6 +95,16 @@ extension AppHarness on WidgetTester {
     await settleRealAsync();
   }
 
+  /// One write to the app's data while it's on screen (a holding added
+  /// behind the screen's back, the currency changed), then the screens
+  /// catch up. One write per call: a second in the same `runAsync` can wait
+  /// forever on the database the screens hold (conventions §11.95).
+  Future<T> write<T>(Future<T> Function() change) async {
+    final result = await runAsync(change);
+    await settleRealAsync();
+    return result as T;
+  }
+
   /// Lets work on the real event loop finish (a database write and the
   /// queries it wakes), then settles; twice, as a write's answer can
   /// start another frame's work.

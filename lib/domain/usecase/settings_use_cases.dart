@@ -12,6 +12,17 @@ class ObserveSettingsUseCase {
   Stream<AppSettings> call() => _settings.watch();
 }
 
+/// The settings now, read once (the holding form takes the currency the
+/// buy price is typed in when it opens).
+@injectable
+class CurrentSettingsUseCase {
+  const CurrentSettingsUseCase(this._settings);
+
+  final SettingsRepository _settings;
+
+  AppSettings call() => _settings.current;
+}
+
 /// Pauses or resumes live prices. Resuming keeps the interval the user
 /// chose.
 @injectable

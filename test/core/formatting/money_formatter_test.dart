@@ -74,4 +74,35 @@ void main() {
       expect(MoneyFormatter.compactNumber(589500000000000), '589.5T');
     });
   });
+
+  group('gains and losses', () {
+    final usd = MoneyFormatter(Currency.usd);
+    final eur = MoneyFormatter(Currency.eur, rate: 0.92);
+
+    test('signed, with the typographic minus', () {
+      expect(usd.signedPrice(1234.56), r'+$1,234.56');
+      expect(usd.signedPrice(-12), '−\$12.00');
+      expect(eur.signedPrice(100), '+€92.00');
+    });
+
+    test('zero has no sign; a tiny amount keeps its digits and its sign '
+        '(the price rule: 4 significant digits under one unit)', () {
+      expect(usd.signedPrice(0), r'$0.00');
+      expect(usd.signedPrice(0.001), r'+$0.001');
+      expect(usd.signedPrice(-0.0004567), '−\$0.0004567');
+    });
+
+    test('in words for a screen reader', () {
+      expect(usd.describeSignedPrice(1234.56), r'plus $1,234.56');
+      expect(usd.describeSignedPrice(-12), r'minus $12.00');
+      expect(usd.describeSignedPrice(0), r'$0.00');
+    });
+  });
+
+  test('a coin amount: as typed, grouped, up to 8 decimals', () {
+    expect(MoneyFormatter.coinAmount(0.5), '0.5');
+    expect(MoneyFormatter.coinAmount(1250000), '1,250,000');
+    expect(MoneyFormatter.coinAmount(0.00012345), '0.00012345');
+    expect(MoneyFormatter.coinAmount(2), '2');
+  });
 }

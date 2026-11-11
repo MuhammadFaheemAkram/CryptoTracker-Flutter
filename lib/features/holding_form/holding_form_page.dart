@@ -1,43 +1,53 @@
 import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/core/navigation/app_routes.dart';
-import 'package:crypto_tracker/core/navigation/fallback_close_button.dart';
+import 'package:crypto_tracker/di/injection.dart';
+import 'package:crypto_tracker/features/holding_form/cubit/holding_form_cubit.dart';
+import 'package:crypto_tracker/features/holding_form/cubit/holding_form_state.dart';
+import 'package:crypto_tracker/features/holding_form/holding_form_view.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// The holding form, a full-screen dialog: a new holding, or an existing
-/// one ([holdingId]). Phase 5 builds the form.
+/// The holding form, a full-screen dialog: a new holding (of [coinId], from
+/// a coin's page), or an existing one ([holdingId]).
+///
+/// Saved, it closes and says what it did; opened by a link (nothing
+/// underneath), it goes to the Portfolio instead.
 class HoldingFormPage extends StatelessWidget {
   const HoldingFormPage({super.key, this.holdingId, this.coinId});
 
   /// The holding being edited; `null` for a new one.
   final int? holdingId;
 
-  /// The coin a new holding starts with (from a coin's page).
+  /// The coin a new holding starts with.
   final String? coinId;
-
-  bool get _isEditing => holdingId != null;
 
   @override
   Widget build(BuildContext context) {
-    final coinId = this.coinId;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit holding' : 'Add holding'),
-        // A full-screen dialog brings its own Close; opened by a link, this
-        // one goes to the Portfolio instead.
-        leading: fallbackCloseButton(
-          context,
-          () => const PortfolioRoute().go(context),
+    return BlocProvider(
+      create: (_) =>
+          getIt<HoldingFormCubit>(param1: coinId, param2: holdingId)..load(),
+      child: BlocListener<HoldingFormCubit, HoldingFormState>(
+        listenWhen: (_, state) => state is HoldingFormSaved,
+        listener: (context, state) {
+          if (state case HoldingFormSaved(:final message)) {
+            showAppSnackBar(ScaffoldMessenger.of(context), message);
+            _leave(context);
+          }
+        },
+        child: HoldingFormView(
+          isEditing: holdingId != null,
+          onCloseWithoutBack: () => const PortfolioRoute().go(context),
         ),
       ),
-      body: EmptyStateView(
-        icon: Icons.add_card_outlined,
-        title: 'The form arrives in Phase 5',
-        message: switch ((holdingId, coinId)) {
-          (final int id, _) => 'Holding $id.',
-          (null, final String coin) => 'A new holding of "$coin".',
-          (null, null) => 'A new holding.',
-        },
-      ),
     );
+  }
+
+  static void _leave(BuildContext context) {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      const PortfolioRoute().go(context);
+    }
   }
 }

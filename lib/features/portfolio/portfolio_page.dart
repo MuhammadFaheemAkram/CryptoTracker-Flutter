@@ -1,23 +1,23 @@
-import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/core/navigation/app_routes.dart';
+import 'package:crypto_tracker/di/injection.dart';
+import 'package:crypto_tracker/features/portfolio/cubit/portfolio_cubit.dart';
+import 'package:crypto_tracker/features/portfolio/portfolio_view.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// The Portfolio tab: holdings valued live. Phase 5 fills it.
+/// The Portfolio tab's entry point: creates the [PortfolioCubit] and turns
+/// the view's callbacks into typed routes (the holding form, new or edit).
 class PortfolioPage extends StatelessWidget {
   const PortfolioPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Portfolio')),
-      body: EmptyStateView(
-        icon: Icons.pie_chart_outline,
-        title: 'The portfolio arrives in Phase 5',
-        message: 'Its value and P/L will move with every price tick.',
-        action: FilledButton.tonal(
-          onPressed: () => const NewHoldingRoute().push<void>(context),
-          child: const Text('Add holding'),
-        ),
+    return BlocProvider(
+      create: (_) => getIt<PortfolioCubit>()..load(),
+      child: PortfolioView(
+        onAddHolding: () => const NewHoldingRoute().push<void>(context),
+        onEditHolding: (id) =>
+            EditHoldingRoute(holdingId: id).push<void>(context),
       ),
     );
   }

@@ -4,7 +4,7 @@ How CryptoTracker uses Dart streams: every pipeline in the app, drawn as a marbl
 
 This is the Flutter counterpart of the Android edition's `FLOW_PIPELINES.md` (Kotlin Flow) and the iOS edition's `COMBINE_PIPELINES.md` (Combine). The [operator table](#flow--combine--dart) at the end maps the three.
 
-> **Version 2 (Phase 4):** the ticker, price moves, the search, the market, the price history and highs, the settings driving the ticker, **the watchlist (a drift query as a stream)** and **a coin's page**. Phase 5 adds the portfolio.
+> **Version 3 (Phase 5):** the ticker, price moves, the search, the market, the price history and highs, the settings driving the ticker, the watchlist (a drift query as a stream), a coin's page, **the portfolio's live valuation** and **the holding form's price (`switchMap` on the chosen coin)**.
 
 ---
 
@@ -290,6 +290,55 @@ range ─ distinct ────────────────────�
 
 ---
 
+## 10. The portfolio: `combineLatest3`
+
+`domain/usecase/observe_portfolio_use_case.dart` + `domain/pipeline/portfolio_valuation.dart`
+
+```
+snapshots ─────────────────┐   (§2: a tick, with directions)
+watchHoldings() (drift) ───┼─ combineLatest3 ─▶ valuePortfolio ─▶ PortfolioListing
+settings ─ priceDisplay ───┘   (currency, paused)
+```
+
+- **Three reasons to re-value, one pipeline:**
+  - a tick (prices moved);
+  - a holding added, edited or removed (the table changed, from the form, a swipe, Undo or a coin's page);
+  - another currency.
+
+  Each arrives as a new value of one input, and `combineLatest` re-derives everything from the latest of all three.
+- **The maths is a pure function** (`valuePortfolio`), tested without streams (Correctness Rule 10):
+  - value = amount × price; cost = amount × buy price; P/L % = 0 when the cost is 0;
+  - the 24 h change uses each quote's `open24hUsd`, never an accumulated drift.
+- **The allocation adds up to exactly 100 %:**
+  - shares are whole hundredths of a percent (basis points);
+  - each is rounded, and the remainder goes to the largest slice;
+  - one slice per coin, the top 5, then "Other".
+- **Dollars all the way down:** the valuation is in USD, and the listing carries the currency and its rate. A currency change re-emits the *same* valuation with a new rate (a test checks it's equal), and the screen converts as it formats.
+
+---
+
+## 11. The holding form: `switchMap` on the chosen coin
+
+`features/holding_form/cubit/holding_form_cubit.dart`
+
+```
+chosen coin:  ──btc───────────────sol──────────────▶   (a BehaviorSubject, the picker writes it)
+switchMap:      price(btc)          price(sol)          the btc subscription is cancelled at the switch
+prices:       ──67240──67310──67290─148.9──149.2───▶   only the chosen coin's, distinct
+form:         "worth now" = amount × the latest price
+```
+
+- **`switchMap`, not `flatMap`:** picking Solana must stop Bitcoin's prices at once, or a late Bitcoin tick would value Solana at Bitcoin's price. A mutation (`switchMap` → `flatMap`) is caught by a test that ticks the old coin after the switch.
+- **A suggestion, not a moving target:**
+  - a new holding's empty buy price takes the coin's price once, rounded as prices are shown ("69762.39", not the walk's "69762.39175474");
+  - after that the field stays put while "worth now" follows the ticks;
+  - a suggested price is replaced when the coin changes, a typed one never is;
+  - a suggestion doesn't count as a change, so closing the form doesn't ask.
+- **Currency at the edge:** the buy price is typed in the chosen currency and divided by its rate on save. An edit shows it multiplied back, so €2,760 stays €2,760 (Correctness Rule 2).
+- **One-off messages aren't state:** a save that fails ("Couldn't save that change") goes through a broadcast `failures` stream the view listens to, so a rebuild never shows it twice.
+
+---
+
 ## Flow ↔ Combine ↔ Dart
 
 | Idea | Kotlin Flow (Android) | Combine (iOS) | **Dart / rxdart (this app)** |
@@ -342,4 +391,4 @@ range ─ distinct ────────────────────�
 
 ## Coming next
 
-- **Phase 5:** the portfolio: `combineLatest3(quotes, holdings (a drift query), currency)` → the valuation, recomputed on every tick, and the database's first migration (v1 → v2).
+- **Phase 6:** Settings (currency, interval, appearance), whose writes flow through `priceDisplay()` into every pipeline above with no new stream code.

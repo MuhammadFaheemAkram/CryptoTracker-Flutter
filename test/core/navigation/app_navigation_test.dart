@@ -103,8 +103,8 @@ void main() {
 
       await tester.tapAndSettle(find.text('Add holding'));
       expect(appBarTitled('Add holding'), findsOneWidget);
-      expect(find.text('A new holding.'), findsOneWidget);
-      final route = ModalRoute.of(tester.element(find.text('A new holding.')));
+      expect(find.text('Choose a coin'), findsNothing); // nothing chosen yet
+      final route = ModalRoute.of(tester.element(find.text('Amount')));
       expect(route, isA<PageRoute<void>>());
       expect((route! as PageRoute<void>).fullscreenDialog, isTrue);
       expect(find.byType(CloseButton), findsOneWidget);
@@ -120,7 +120,7 @@ void main() {
       await tester.tapAndSettle(find.text('Add to portfolio'));
 
       expect(appBarTitled('Add holding'), findsOneWidget);
-      expect(find.text('A new holding of "solana".'), findsOneWidget);
+      expect(find.text('Solana · SOL'), findsOneWidget);
       await tester.tapAndSettle(find.byType(CloseButton));
       expect(appBarTitled('Solana'), findsOneWidget);
     });
@@ -133,7 +133,7 @@ void main() {
         initialLocation: '/holdings/new?coin-id=bitcoin',
       );
 
-      expect(find.text('A new holding of "bitcoin".'), findsOneWidget);
+      expect(find.text('Bitcoin · BTC'), findsOneWidget);
     });
 
     testWidgets('by link, editing opens with Close to the Portfolio', (
@@ -141,7 +141,7 @@ void main() {
     ) async {
       await pumpCryptoTracker(tester, initialLocation: '/holdings/7/edit');
       expect(appBarTitled('Edit holding'), findsOneWidget);
-      expect(find.text('Holding 7.'), findsOneWidget);
+      expect(find.text('Holding not found'), findsOneWidget); // none yet
 
       await tester.tapAndSettle(find.byTooltip('Close'));
 

@@ -48,6 +48,29 @@ final class MoneyFormatter {
         .format(value);
   }
 
+  /// A gain or a loss, with its sign: "+$1,234.56", "−€12.00" (the
+  /// typographic minus, as wide as the plus). An amount that shows as zero
+  /// has no sign, so the sign never disagrees with the digits.
+  String signedPrice(double usd) {
+    final digits = price(usd.abs());
+    if (digits == price(0)) return digits;
+    return '${usd > 0 ? '+' : '−'}$digits';
+  }
+
+  /// The same gain or loss in words, for a screen reader: "plus $1,234.56",
+  /// "minus €12.00".
+  String describeSignedPrice(double usd) {
+    final signed = signedPrice(usd);
+    return signed
+        .replaceFirst(RegExp(r'^\+'), 'plus ')
+        .replaceFirst(RegExp('^−'), 'minus ');
+  }
+
+  /// An amount of a coin, as precise as it was typed (up to 8 decimals)
+  /// and grouped: "0.5", "1,250,000", "0.00012345".
+  static String coinAmount(double amount) =>
+      NumberFormat('#,##0.########', _locale).format(amount);
+
   /// A large amount, compact, to three significant digits (intl's
   /// convention): "$1.32T", "$42.2B", "€920B".
   String compact(double usd) => NumberFormat.compactSimpleCurrency(

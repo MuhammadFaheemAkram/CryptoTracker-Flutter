@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:crypto_tracker/core/database/app_database.dart';
+import 'package:crypto_tracker/core/database/daos/portfolio_dao.dart';
 import 'package:crypto_tracker/core/database/daos/watchlist_dao.dart';
 import 'package:crypto_tracker/core/storage/settings_local_data_source.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,9 @@ abstract class AppModule {
 
   @lazySingleton
   WatchlistDao watchlistDao(AppDatabase database) => database.watchlistDao;
+
+  @lazySingleton
+  PortfolioDao portfolioDao(AppDatabase database) => database.portfolioDao;
 
   /// The app bundle, where the fake market service reads its JSON.
   @lazySingleton
