@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:clock/clock.dart';
 import 'package:crypto_tracker/core/common/app_exception.dart';
 import 'package:crypto_tracker/core/common/result.dart';
+import 'package:crypto_tracker/core/prices/price_history.dart';
 import 'package:crypto_tracker/core/prices/price_ticker.dart';
 import 'package:crypto_tracker/core/prices/random_walk.dart';
 import 'package:crypto_tracker/data/repository/market_repository_impl.dart';
@@ -17,6 +18,7 @@ import '../../helpers/fixtures.dart';
 void main() {
   late ScriptedMarketApi api;
   late PriceTicker ticker;
+  late PriceHistory history;
   late MarketRepositoryImpl repository;
 
   PriceTicker newTicker() =>
@@ -31,7 +33,14 @@ void main() {
         coinDto(),
       ],
     );
-    repository = MarketRepositoryImpl(api, Clock.fixed(testNow), ticker);
+    history = PriceHistory(ticker);
+    addTearDown(history.dispose);
+    repository = MarketRepositoryImpl(
+      api,
+      Clock.fixed(testNow),
+      ticker,
+      history,
+    );
   });
 
   MarketSeed seedOf(Result<MarketSeed> result) => switch (result) {
@@ -149,10 +158,15 @@ void main() {
     // A sanity check that the empty sparkline itself is valid data…
     expect(await repository.loadMarket(), isA<Ok<MarketSeed>>());
 
+    final brokenTicker = newTicker();
+    addTearDown(brokenTicker.dispose);
+    final brokenHistory = PriceHistory(brokenTicker);
+    addTearDown(brokenHistory.dispose);
     final broken = MarketRepositoryImpl(
       _ErrorApi(),
       Clock.fixed(testNow),
-      newTicker(),
+      brokenTicker,
+      brokenHistory,
     );
     await expectLater(broken.loadMarket(), throwsA(isA<StateError>()));
   });

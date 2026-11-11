@@ -1,4 +1,6 @@
 import 'package:crypto_tracker/core/common/result.dart';
+import 'package:crypto_tracker/core/database/app_database.dart';
+import 'package:crypto_tracker/core/database/daos/watchlist_dao.dart';
 import 'package:crypto_tracker/core/network/fake_market_api.dart';
 import 'package:crypto_tracker/core/network/market_api.dart';
 import 'package:crypto_tracker/core/prices/price_history.dart';
@@ -6,17 +8,22 @@ import 'package:crypto_tracker/core/prices/price_ticker.dart';
 import 'package:crypto_tracker/core/prices/ticker_scheduler.dart';
 import 'package:crypto_tracker/data/repository/market_repository_impl.dart';
 import 'package:crypto_tracker/data/repository/settings_repository_impl.dart';
+import 'package:crypto_tracker/data/repository/watchlist_repository_impl.dart';
 import 'package:crypto_tracker/di/injection.dart';
 import 'package:crypto_tracker/domain/model/market_seed.dart';
 import 'package:crypto_tracker/domain/repository/market_repository.dart';
 import 'package:crypto_tracker/domain/repository/settings_repository.dart';
+import 'package:crypto_tracker/domain/repository/watchlist_repository.dart';
+import 'package:crypto_tracker/features/coin_detail/cubit/coin_detail_cubit.dart';
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../helpers/test_dependencies.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(configureDependencies);
+  setUp(configureTestDependencies);
   tearDown(getIt.reset);
 
   test('the composition root picks the fake service and the real '
@@ -24,6 +31,21 @@ void main() {
     expect(getIt<MarketApi>(), isA<FakeMarketApi>());
     expect(getIt<MarketRepository>(), isA<MarketRepositoryImpl>());
     expect(getIt<SettingsRepository>(), isA<SettingsRepositoryImpl>());
+    expect(getIt<WatchlistRepository>(), isA<WatchlistRepositoryImpl>());
+  });
+
+  test('one database for the whole app, and its DAO comes from it', () {
+    expect(getIt<AppDatabase>(), same(getIt<AppDatabase>()));
+    expect(getIt<WatchlistDao>(), same(getIt<AppDatabase>().watchlistDao));
+  });
+
+  test("a coin's page gets its own Cubit, for its coin (a factory "
+      'parameter)', () async {
+    final bitcoin = getIt<CoinDetailCubit>(param1: 'bitcoin');
+    final ether = getIt<CoinDetailCubit>(param1: 'ethereum');
+    expect(bitcoin.coinId, 'bitcoin');
+    expect(ether.coinId, 'ethereum');
+    await (bitcoin.close(), ether.close()).wait;
   });
 
   test('one ticker, one history, one scheduler, one repository each: '

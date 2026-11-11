@@ -6,6 +6,7 @@ import 'package:crypto_tracker/domain/model/sort_option.dart';
 import 'package:crypto_tracker/domain/usecase/load_market_use_case.dart';
 import 'package:crypto_tracker/domain/usecase/observe_market_use_case.dart';
 import 'package:crypto_tracker/domain/usecase/settings_use_cases.dart';
+import 'package:crypto_tracker/domain/usecase/watchlist_use_cases.dart';
 import 'package:crypto_tracker/features/market/cubit/market_state.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:injectable/injectable.dart';
@@ -29,13 +30,15 @@ class MarketCubit extends Cubit<MarketState> {
   MarketCubit(
     this._loadMarket,
     this._observeMarket,
-    this._setPaused, {
+    this._setPaused,
+    this._toggleWatch, {
     @ignoreParam this.debounce = searchDebounce,
   }) : super(const MarketState.loading());
 
   final LoadMarketUseCase _loadMarket;
   final ObserveMarketUseCase _observeMarket;
   final SetLivePricesPausedUseCase _setPaused;
+  final ToggleWatchUseCase _toggleWatch;
 
   /// How long typing must pause. Tests that type in real time shorten it.
   final Duration debounce;
@@ -44,13 +47,17 @@ class MarketCubit extends Cubit<MarketState> {
   final _sort = BehaviorSubject<SortOption>.seeded(SortOption.rank);
   StreamSubscription<MarketListing>? _subscription;
 
+  /// Set the moment [close] starts. `isClosed` turns true only at its end,
+  /// after its awaits: a seed arriving in between must not subscribe.
+  bool _closing = false;
+
   /// Loads the seed, then follows the live market. "Try again" after a
   /// failure; ignored once the market is live.
   Future<void> load() async {
     if (_subscription != null) return;
     emit(const MarketState.loading());
     final result = await _loadMarket();
-    if (isClosed) return;
+    if (_closing) return;
     switch (result) {
       case Ok(:final value):
         _subscription = _observeMarket(
@@ -73,10 +80,17 @@ class MarketCubit extends Cubit<MarketState> {
   /// must be pausable, WCAG 2.2.2).
   Future<void> setPaused({required bool paused}) => _setPaused(paused: paused);
 
+  /// The star on a row. The Cubit doesn't mark the row itself: the write
+  /// reaches the watchlist table, drift's query re-runs, and the pipeline's
+  /// watched input brings the filled star back (derived, never patched).
+  /// `Err` if it couldn't be saved; the view says so.
+  Future<Result<bool>> toggleWatch(String coinId) => _toggleWatch(coinId);
+
   /// Nothing is emitted after this: the subscription goes first, then the
   /// inputs close.
   @override
   Future<void> close() async {
+    _closing = true;
     await _subscription?.cancel();
     await (_query.close(), _sort.close()).wait;
     return super.close();

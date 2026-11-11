@@ -128,4 +128,69 @@ void main() {
     expect(ticker.tick, returnsNormally);
     await ticker.dispose();
   });
+
+  group('the highs', () {
+    test('a coin\'s high is its highest price since launch, never capped '
+        'like the points', () {
+      fakeAsync((async) {
+        final ticker = PriceTicker(RandomWalk(Random(6)), clock);
+        final history = PriceHistory(ticker);
+        ticker
+          ..seed(smallMarket())
+          ..start(const Duration(seconds: 1));
+        async.elapse(const Duration(seconds: 90)); // past the 60 points
+
+        final highs = <double?>[];
+        final points = <List<PricePoint>>[];
+        history.watchHigh('bitcoin').listen(highs.add);
+        history.watch('bitcoin').listen(points.add);
+        async.flushMicrotasks();
+
+        // Every price ever seen, including those already off the buffer:
+        // the high is at least the seed's and every kept point's.
+        expect(highs.single, greaterThanOrEqualTo(67240.5));
+        expect(
+          highs.single,
+          greaterThanOrEqualTo(
+            points.single.map((p) => p.priceUsd).reduce(max),
+          ),
+        );
+        ticker.stop();
+      });
+    });
+
+    test('emits again only when it rises', () {
+      fakeAsync((async) {
+        final ticker = PriceTicker(RandomWalk(Random(7)), clock);
+        final history = PriceHistory(ticker); // created with the app
+        ticker.seed(smallMarket());
+        async.flushMicrotasks();
+        final highs = <double?>[];
+        history.watchHigh('bitcoin').listen(highs.add);
+        async.flushMicrotasks();
+
+        for (var i = 0; i < 20; i++) {
+          ticker.tick();
+          async.flushMicrotasks();
+        }
+
+        expect(highs.first, 67240.5);
+        expect(highs.length, greaterThan(1)); // it did rise
+        for (var i = 1; i < highs.length; i++) {
+          expect(highs[i]!, greaterThan(highs[i - 1]!));
+        }
+      });
+    });
+
+    test('an unknown coin has no high', () {
+      fakeAsync((async) {
+        final history = PriceHistory(PriceTicker(RandomWalk(Random(8)), clock));
+        final highs = <double?>[];
+        history.watchHigh('nope').listen(highs.add);
+        async.flushMicrotasks();
+
+        expect(highs, [null]);
+      });
+    });
+  });
 }

@@ -1,4 +1,6 @@
 import 'package:bloc_test/bloc_test.dart';
+import 'package:crypto_tracker/core/common/app_exception.dart';
+import 'package:crypto_tracker/core/common/result.dart';
 import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/domain/model/currency.dart';
 import 'package:crypto_tracker/domain/model/market_listing.dart';
@@ -35,6 +37,7 @@ void main() {
     SortOption sort = SortOption.rank,
     Currency currency = Currency.usd,
     bool paused = false,
+    Set<String> watched = const {},
   }) {
     final market = smallMarket();
     return MarketState.ready(
@@ -44,6 +47,7 @@ void main() {
           quotes: market.quotes,
           query: query.trim(),
           sort: sort,
+          watched: watched,
         ),
         query: query.trim(),
         sort: sort,
@@ -236,5 +240,45 @@ void main() {
     await tester.tap(find.text('Solana'));
 
     expect(opened, ['solana']);
+  });
+
+  group('the watchlist star', () {
+    testWidgets('each row has one, naming the coin and what it will do', (
+      tester,
+    ) async {
+      await show(tester, ready(watched: {'ethereum'}));
+
+      expect(find.byTooltip('Add Bitcoin to watchlist'), findsOneWidget);
+      expect(find.byTooltip('Remove Ethereum from watchlist'), findsOneWidget);
+      expect(find.byIcon(Icons.star), findsOneWidget);
+      expect(find.byIcon(Icons.star_border), findsNWidgets(3));
+    });
+
+    testWidgets('tapping it toggles that coin, not the row', (tester) async {
+      when(() => cubit.toggleWatch(any()))
+          .thenAnswer((_) async => const Ok(true));
+      await show(tester, ready());
+
+      await tester.tap(find.byTooltip('Add Solana to watchlist'));
+      await tester.pump();
+
+      verify(() => cubit.toggleWatch('solana')).called(1);
+      expect(opened, isEmpty);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('a star that can\'t be saved says so', (tester) async {
+      when(() => cubit.toggleWatch(any()))
+          .thenAnswer((_) async => const Err(StorageException()));
+      await show(tester, ready());
+
+      await tester.tap(find.byTooltip('Add Solana to watchlist'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text("Couldn't save that change. Please try again."),
+        findsOneWidget,
+      );
+    });
   });
 }

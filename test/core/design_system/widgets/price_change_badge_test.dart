@@ -60,4 +60,18 @@ void main() {
       contains(const FontFeature.tabularFigures()),
     );
   });
+
+  testWidgets('too narrow a space: it shrinks, never overflows or loses '
+      'digits', (tester) async {
+    await tester.pumpThemed(
+      const Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 40, child: PriceChangeBadge(percent: 2.41)),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('+2.41%'), findsOneWidget);
+    expect(tester.getSize(find.byType(PriceChangeBadge)).width, 40);
+  });
 }

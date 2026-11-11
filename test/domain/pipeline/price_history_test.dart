@@ -57,4 +57,38 @@ void main() {
   test('the capacity is 60 by default', () {
     expect(priceHistoryCapacity, 60);
   });
+
+  group('raiseHighs', () {
+    Map<String, Quote> prices(Map<String, double> byId) => {
+      for (final MapEntry(:key, :value) in byId.entries) key: quote(key, value),
+    };
+
+    test('the first price of a coin is its high', () {
+      expect(raiseHighs(const {}, prices({'a': 10, 'b': 2})), {
+        'a': 10,
+        'b': 2,
+      });
+    });
+
+    test('a higher price raises the high; a lower one leaves it', () {
+      final highs = raiseHighs(const {}, prices({'a': 10, 'b': 2}));
+
+      expect(raiseHighs(highs, prices({'a': 12, 'b': 1})), {'a': 12, 'b': 2});
+    });
+
+    test('nothing rose: the same map comes back (identity)', () {
+      final highs = raiseHighs(const {}, prices({'a': 10}));
+
+      expect(raiseHighs(highs, prices({'a': 10})), same(highs));
+      expect(raiseHighs(highs, prices({'a': 9})), same(highs));
+    });
+
+    test('never mutates the highs it was given', () {
+      final highs = {'a': 10.0};
+
+      raiseHighs(highs, prices({'a': 20}));
+
+      expect(highs, {'a': 10});
+    });
+  });
 }

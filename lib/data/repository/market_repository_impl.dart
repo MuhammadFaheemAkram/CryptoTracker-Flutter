@@ -5,9 +5,11 @@ import 'package:clock/clock.dart';
 import 'package:crypto_tracker/core/common/app_exception.dart';
 import 'package:crypto_tracker/core/common/result.dart';
 import 'package:crypto_tracker/core/network/market_api.dart';
+import 'package:crypto_tracker/core/prices/price_history.dart';
 import 'package:crypto_tracker/core/prices/price_ticker.dart';
 import 'package:crypto_tracker/data/mapper/market_mappers.dart';
 import 'package:crypto_tracker/domain/model/market_seed.dart';
+import 'package:crypto_tracker/domain/model/price_point.dart';
 import 'package:crypto_tracker/domain/model/quote.dart';
 import 'package:crypto_tracker/domain/repository/market_repository.dart';
 import 'package:injectable/injectable.dart';
@@ -21,14 +23,21 @@ import 'package:json_annotation/json_annotation.dart';
 /// memory, and the seed's quotes become the ticker's first snapshot.
 @LazySingleton(as: MarketRepository)
 class MarketRepositoryImpl implements MarketRepository {
-  MarketRepositoryImpl(this._api, this._clock, this._ticker);
+  MarketRepositoryImpl(this._api, this._clock, this._ticker, this._history);
 
   final MarketApi _api;
   final Clock _clock;
   final PriceTicker _ticker;
+  final PriceHistory _history;
 
   @override
   Stream<Map<String, Quote>> get quotes => _ticker.quotes;
+
+  @override
+  Stream<List<PricePoint>> history(String coinId) => _history.watch(coinId);
+
+  @override
+  Stream<double?> highestPrice(String coinId) => _history.watchHigh(coinId);
 
   MarketSeed? _seed;
 

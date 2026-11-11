@@ -4,7 +4,7 @@ How CryptoTracker uses Dart streams: every pipeline in the app, drawn as a marbl
 
 This is the Flutter counterpart of the Android edition's `FLOW_PIPELINES.md` (Kotlin Flow) and the iOS edition's `COMBINE_PIPELINES.md` (Combine). The [operator table](#flow--combine--dart) at the end maps the three.
 
-> **Version 1 (Phase 3):** the ticker, price moves, the search, the market, the price history, and the settings driving the ticker. Phase 4 adds a coin's page and the watchlist; Phase 5 the portfolio.
+> **Version 2 (Phase 4):** the ticker, price moves, the search, the market, the price history and highs, the settings driving the ticker, **the watchlist (a drift query as a stream)** and **a coin's page**. Phase 5 adds the portfolio.
 
 ---
 
@@ -32,6 +32,7 @@ No screen keeps its own copy of a price, and no list is patched by hand.
 | **Cold** stream | Starts per listener, when it listens | `Stream.value`, `TimerStream`, each use-case pipeline |
 | **`BehaviorSubject`** (rxdart) | A broadcast stream that **remembers its latest value**: a new listener gets it at once, and `.value` reads it synchronously | the ticker, the settings, the Cubit's query and sort |
 | **`ValueStream`** | The read-only view of a `BehaviorSubject` | `PriceTicker.quotes` |
+| **Query stream** (drift) | A database query's `watch()`: the current result at once, then again after every write to its tables | the watchlist |
 
 **Why a `BehaviorSubject` for the market:**
 - A screen that opens a minute into the session (the Watchlist, a coin's page) must see the prices *now*.
@@ -123,7 +124,7 @@ snapshots: ──S0───────────────S1────�
 query:     ──""─────────"sol"──────────────────────────────▶   (§3, settled)
 sort:      ──rank─────────────────────price───────────────▶   (distinct)
 settings:  ──(USD, live)─────────────────────────(EUR, live)─▶   (currency + pause, distinct)
-watchlist: ──{}────────────────────────────────────────────▶   (Phase 4)
+watched:   ──{}──────────────────{eth}─────────────────────▶   (drift query, §8)
            ──────────────────────────────────────────────────
 listings:  ──L0─────────L1────L2──────L3──────────L4──L5─▶
                every change of ANY input → buildMarketRows(the latest of each)
@@ -135,7 +136,7 @@ listings:  ──L0─────────L1────L2──────
 - **The first listing arrives at once:** `combineLatest` waits until every input has a value, and here they all do immediately:
   - the ticker and the settings are `BehaviorSubject`s;
   - the Cubit's query and sort are seeded subjects;
-  - the watchlist is `Stream.value({})` for now.
+  - the watchlist is a drift query, which emits its current result when listened to.
 - **Each input is narrowed and `distinct`:**
   - the market takes only `(currency, paused)` from the settings, so a theme change never recomputes it;
   - the same sort chosen again recomputes nothing.
@@ -144,7 +145,7 @@ listings:  ──L0─────────L1────L2──────
 
 ---
 
-## 5. The price history: a bounded `scan`
+## 5. The price history and highs: two `scan`s
 
 `core/prices/price_history.dart` + `domain/pipeline/price_history.dart`
 
@@ -155,7 +156,16 @@ watch(btc): the current list at once, then each new one (distinct by identity)
 ```
 
 - **A bounded buffer:** the accumulator is every coin's points. Each snapshot appends one per coin and drops the oldest past 60, so a long session never grows memory.
-- **Eager:** `PriceHistory` is an eager singleton that subscribes when the app starts. A coin's chart (Phase 4) has a minute of points the first time it opens.
+- **Eager:** `PriceHistory` is an eager singleton that subscribes when the app starts. A coin's chart has a minute of points the first time it opens.
+- **The second `scan`, the highs:**
+
+  ```
+  quotes:  ──100──105──98──110──104──▶      (one coin)
+  scan:    ──100──105──105─110──110──▶      raiseHighs(highs, quotes)
+  distinct ──100──105──────110───────▶      watchHigh(btc)
+  ```
+  - its accumulator is each coin's highest price since launch, and it is **never capped**: the all-time high a coin's page shows can't fall when an old point leaves the 60-point buffer;
+  - a snapshot that raises nothing returns the *same* map, so listeners comparing by identity see no change.
 - **Immutable steps:**
   - `appendSnapshot` returns new lists and never touches the old ones;
   - an unchanged coin keeps its *same* list object, so `distinct(identical)` drops ticks that didn't touch it;
@@ -203,6 +213,10 @@ MarketCubit
 
 - **The Cubit owns only its inputs and one subscription.** It never computes a row, and never keeps a price. It's the Dart counterpart of a ViewModel collecting a Flow into a `StateFlow`.
 - **Inputs are seeded subjects,** so the pipeline's first listing doesn't wait for a keystroke.
+- **Closing while loading:**
+  - `close()` sets a flag *first*, because `isClosed` turns true only at the end of `close()`, after its awaits;
+  - a seed that lands during those awaits would otherwise subscribe after the cancel and emit into a closed Cubit;
+  - every Cubit checks the flag after awaiting the seed, and a test closes each one mid-load.
 - **Why a Cubit and not a Bloc:**
   - the debounce is an operator *inside* the pipeline, on a stream combined with four others;
   - Bloc's event transformers would add events around it without adding anything.
@@ -215,6 +229,64 @@ MarketCubit
   - a paused market has no new ticks, so nothing flashes.
 - **`ValueKey(coin.id)` on rows:** a re-sort moves rows, and their flash state, instead of rebuilding them.
 - **Reduced motion:** with `MediaQuery.disableAnimationsOf`, no flash and no cross-fade. The arrow and the changing number still say what happened.
+
+---
+
+## 8. The watchlist: a database query as a stream
+
+`core/database/daos/watchlist_dao.dart` + `domain/usecase/observe_watchlist_rows_use_case.dart`
+
+```
+star (Market row) ─ toggle ─▶ watch_items (drift) ─┐
+star (coin page)  ─ toggle ─▶        │             │  every write re-runs the query
+swipe / Undo      ─ remove / restore ┘             │
+                                                   ▼
+watchIds():   ──[sol, btc]──────[sol, btc, eth]──[btc, eth]──▶    ordered by when each was starred
+```
+
+- **The table is the source of truth; screens never tell each other.**
+  - Every star is a *write*. The Market's row, the coin's page and the Watchlist tab each *observe* a query, and drift re-runs it after each write.
+  - The star fills, the row appears, the count changes, each on its own. That's Room's `Flow<List<T>>` and SwiftData's `@Query`.
+- **Writes return results, reads are streams:**
+  - `toggle` returns `Ok(true)` (now starred), `remove` returns the removed row (what Undo needs), and `restore` puts that row back with its old time, so it returns to its place;
+  - a failure is `Err(StorageException)` ("Couldn't save that change"), and the screen says it.
+- **The Watchlist tab's pipeline:**
+
+  ```
+  snapshots ─────────────────┐   (§2)
+  watchIds (drift) ──────────┼─ combineLatest3 ─▶ buildWatchlistRows ─▶ WatchlistListing
+  settings ─ priceDisplay ───┘   (currency, paused)
+  ```
+  The rows come in **starred order**, not by rank. An id the seed doesn't know is skipped.
+- **The Market's fifth input:** `watchIds().map(toSet)` feeds `buildMarketRows`, which marks each row's star.
+- **A swipe waits for the write.** `Dismissible.confirmDismiss` awaits the removal:
+  - a failure slides the row back and says why;
+  - only a removal that succeeded dismisses the row, which then stays hidden until the query drops it a moment later. A dismissed widget must leave the tree at once, while the list follows the database.
+
+---
+
+## 9. A coin's page: `combineLatest6`
+
+`domain/usecase/observe_coin_detail_use_case.dart`
+
+```
+snapshots ─ map(this coin's quote, direction) ─ distinct ┐   other coins' ticks dropped here
+history(id) ─────────────────────────────────────────────┤   (§5, the Live chart)
+highestPrice(id) ────────────────────────────────────────┤   (§5, the all-time high)
+watchContains(id) (drift) ───────────────────────────────┼─ combineLatest6 ─▶ CoinDetail
+settings ─ priceDisplay ─────────────────────────────────┤   (currency, paused)
+range ─ distinct ────────────────────────────────────────┘   (Live | 7 days, the Cubit's input)
+```
+
+- **Narrow before combining:** the snapshot carries all 32 coins. `map` to this coin, then `distinct`, and a tick that left this coin alone never rebuilds the page.
+- **The live stats are getters on the output**, computed from the quote it carries (Correctness Rule 9):
+  - market cap = circulating supply × the current price;
+  - the all-time high = the highest of the seed's record, the highest price seen and the price itself.
+
+  They can never disagree with the price beside them.
+- **The chart's range is an input like any other.** The Cubit owns a seeded `BehaviorSubject<ChartRange>`, as the Market's Cubit owns the query and the sort. Picking "7 days" re-derives the page and patches nothing.
+- **No quote, no page:** a snapshot without the coin emits nothing (`whereType`), rather than a page with a hole in it.
+- **The Cubit takes the coin's id as a factory parameter** (`@factoryParam`): `getIt<CoinDetailCubit>(param1: id)`, one Cubit per open page.
 
 ---
 
@@ -234,6 +306,7 @@ MarketCubit
 | Drop repeats | `distinctUntilChanged` | `removeDuplicates` | `distinct` |
 | Transform | `map` | `map` | `map` |
 | Start with | `onStart { emit(x) }` | `prepend` | `startWith` |
+| A database query, live | Room `Flow<List<T>>` | SwiftData `@Query` | drift `.watch()` |
 | Collect in the UI | `collectAsStateWithLifecycle` | `sink` + `@Observable` | a Cubit's `listen` → `emit` → `BlocBuilder` |
 | Cancel | `Job.cancel()` | `AnyCancellable.cancel()` | `StreamSubscription.cancel()` |
 | Test | Turbine (`awaitItem()`) | collected values | `StreamQueue` (`next`), `emitsInOrder`, `fakeAsync` |
@@ -243,6 +316,7 @@ MarketCubit
 ## Testing the pipelines
 
 - **`StreamQueue` (package `async`), the Turbine of Dart:** `await queue.next` is the next value, in order. Used for the market pipeline and the price moves: each input changes, and the next listing is checked.
+  - A `tearDown` cancels with `cancel(immediate: true)`. A plain `cancel()` waits for a `next` still pending, so a test that failed waiting for a value would hang the whole run instead of failing.
 - **Pure functions first:** `buildMarketRows`, `directionsBetween`, `appendSnapshot`, `RandomWalk` and the formatters are tested without any stream.
 - **Fake time (`fakeAsync`):**
   - the ticker's intervals, the debounce's 300 ms and the Cubit's states are exact;
@@ -254,6 +328,11 @@ MarketCubit
      - a Cubit's `close()`, which awaits a cancel, never completes.
 
      It's only the test clock: in the app the future completes at once. Those tests run in real time with a short debounce (40 ms). Widget tests alternate `tester.runAsync(pumpEventQueue)` with `tester.pump()`.
+- **drift in tests:**
+  - the database is in memory, with `closeStreamsSynchronously` (§11.24);
+  - a query stream's `first` hangs in fake time (its cancel never completes, §11.27), so app tests read the database inside `tester.runAsync`, and writes from taps settle on the real loop (`tapAndWrite`, §11.95);
+  - the exported schema is checked against the app's tables (`test/drift/`).
+- **A singleton created inside `runAsync` listens in the root zone** (§11.123). `PriceHistory` is eager, so it's built when the test configures the app inside `runAsync`. Its `scan` callbacks then run as *real* microtasks, which fake-time pumps never flush: the ticks happen, but the chart stays at one point. A test of the live chart gives the real loop a turn (`tester.runAsync(pumpEventQueue)`). In the app there's one zone and no gap.
 - **Widget and app tests:**
   - the app's own tests start with live prices **paused**: a ticking market never lets `pumpAndSettle` settle, and a periodic timer left running fails a test;
   - a test that wants ticks turns them on and pauses before it ends;
@@ -263,5 +342,4 @@ MarketCubit
 
 ## Coming next
 
-- **Phase 4:** the watchlist (a drift `watch()` stream) becomes the market's fifth input; a coin's page combines its quote, its history, whether it's watched and the currency.
-- **Phase 5:** the portfolio: `combineLatest3(quotes, holdings, currency)` → the valuation, recomputed on every tick.
+- **Phase 5:** the portfolio: `combineLatest3(quotes, holdings (a drift query), currency)` → the valuation, recomputed on every tick, and the database's first migration (v1 → v2).

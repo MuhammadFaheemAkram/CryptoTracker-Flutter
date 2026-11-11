@@ -1,9 +1,9 @@
 import 'package:crypto_tracker/core/design_system/charts/sparkline.dart';
 import 'package:crypto_tracker/core/design_system/large_text.dart';
-import 'package:crypto_tracker/core/design_system/theme/app_colors.dart';
 import 'package:crypto_tracker/core/design_system/theme/app_spacing.dart';
 import 'package:crypto_tracker/core/design_system/widgets/coin_badge.dart';
 import 'package:crypto_tracker/core/design_system/widgets/price_change_badge.dart';
+import 'package:crypto_tracker/core/design_system/widgets/price_flash.dart';
 import 'package:crypto_tracker/core/formatting/percent_formatter.dart';
 import 'package:crypto_tracker/domain/model/price_direction.dart';
 import 'package:material_ui/material_ui.dart';
@@ -14,8 +14,8 @@ import 'package:material_ui/material_ui.dart';
 /// It only renders: the caller formats [price] (in the chosen currency) and
 /// decides what a tap does. When the price ticks ([tick] changes), the row
 /// **flashes** green or red ([direction]) and fades back, and the price
-/// cross-fades to its new value. Phase 4 adds the watchlist star (as
-/// [trailing]).
+/// cross-fades to its new value ([PriceFlash], [AnimatedPrice]). The
+/// watchlist star goes in [trailing].
 ///
 /// The rank sits with the symbol ("#1 · BTC") rather than in a column of its
 /// own: on a phone, a rank column, the sparkline, the price and the star
@@ -75,7 +75,7 @@ class CoinRow extends StatelessWidget {
         '$name, $upperSymbol, rank $rank, $price, '
         '${PercentFormatter.describeChange(change24hPercent)}';
     final trailing = this.trailing;
-    return _Flash(
+    return PriceFlash(
       direction: direction,
       tick: tick,
       child: Row(
@@ -112,100 +112,6 @@ class CoinRow extends StatelessWidget {
   }
 }
 
-/// The row's background: a tint of the up or down color for a moment after
-/// a tick, fading back to nothing over [duration].
-///
-/// `Ink`, not a `ColoredBox`: the ripple of a tap paints on the same
-/// `Material`, so it stays visible over the tint. Off when the platform
-/// asks for reduced motion: then nothing flashes, and the arrow and the
-/// changing number still say what happened.
-class _Flash extends StatefulWidget {
-  const _Flash({
-    required this.direction,
-    required this.tick,
-    required this.child,
-  });
-
-  final PriceDirection direction;
-  final Object? tick;
-  final Widget child;
-
-  static const duration = Duration(milliseconds: 600);
-
-  @override
-  State<_Flash> createState() => _FlashState();
-}
-
-class _FlashState extends State<_Flash> with SingleTickerProviderStateMixin {
-  late final _fade = AnimationController(
-    vsync: this,
-    duration: _Flash.duration,
-    value: 1, // faded out: the first build doesn't flash
-  );
-
-  @override
-  void didUpdateWidget(_Flash old) {
-    super.didUpdateWidget(old);
-    if (widget.tick != old.tick &&
-        widget.direction != PriceDirection.flat &&
-        !MediaQuery.disableAnimationsOf(context)) {
-      _fade.forward(from: 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _fade.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appColors;
-    final tint = switch (widget.direction) {
-      PriceDirection.up => colors.upFlash,
-      PriceDirection.down => colors.downFlash,
-      PriceDirection.flat => null,
-    };
-    return AnimatedBuilder(
-      animation: _fade,
-      builder: (context, child) => Ink(
-        color: tint == null || _fade.isCompleted
-            ? null
-            : Color.lerp(tint, tint.withValues(alpha: 0), _fade.value),
-        child: child,
-      ),
-      child: widget.child,
-    );
-  }
-}
-
-/// The price, cross-fading to each new value (instantly with reduced
-/// motion), both values aligned on [alignment] while they overlap.
-class _Price extends StatelessWidget {
-  const _Price(
-    this.price, {
-    required this.style,
-    this.alignment = AlignmentDirectional.centerEnd,
-  });
-
-  final String price;
-  final TextStyle? style;
-  final AlignmentDirectional alignment;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 250),
-      layoutBuilder: (current, previous) =>
-          Stack(alignment: alignment, children: [...previous, ?current]),
-      child: Text(price, key: ValueKey(price), style: _tabular(style)),
-    );
-  }
-}
-
 /// The usual layout: the name on the left, the price on the right.
 class _SideBySide extends StatelessWidget {
   const _SideBySide({required this.row, required this.symbol});
@@ -213,8 +119,11 @@ class _SideBySide extends StatelessWidget {
   final CoinRow row;
   final String symbol;
 
-  /// Below this width the sparkline would squeeze the name: it goes.
-  static const sparklineMinWidth = 340.0;
+  /// Below this width the sparkline would squeeze the name: it goes. A
+  /// phone's row with the watchlist star beside it is about 325–340 wide
+  /// (390–402 points less the padding and the star), and keeps it; a
+  /// 320-point phone doesn't (the name gets the room).
+  static const sparklineMinWidth = 320.0;
 
   @override
   Widget build(BuildContext context) {
@@ -248,7 +157,7 @@ class _SideBySide extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _Price(row.price, style: theme.textTheme.titleMedium),
+              AnimatedPrice(row.price, style: theme.textTheme.titleMedium),
               PriceChangeBadge(
                 percent: row.change24hPercent,
                 style: theme.textTheme.bodySmall,
@@ -304,7 +213,7 @@ class _Stacked extends StatelessWidget {
               _RankAndSymbol(row: row, symbol: symbol),
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: _Price(
+                child: AnimatedPrice(
                   row.price,
                   style: theme.textTheme.titleMedium,
                   alignment: AlignmentDirectional.centerStart,

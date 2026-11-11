@@ -44,8 +44,7 @@ void main() {
       await pumpCryptoTracker(tester);
 
       await tester.tapAndSettle(find.text('Bitcoin'));
-      expect(appBarTitled('Coin'), findsOneWidget);
-      expect(find.text('Coin "bitcoin"'), findsOneWidget);
+      expect(appBarTitled('Bitcoin'), findsOneWidget);
       expect(find.byType(NavigationBar), findsNothing);
 
       await tester.tapAndSettle(find.byType(BackButton));
@@ -56,7 +55,7 @@ void main() {
       tester,
     ) async {
       await pumpCryptoTracker(tester, initialLocation: '/coins/ethereum');
-      expect(find.text('Coin "ethereum"'), findsOneWidget);
+      expect(appBarTitled('Ethereum'), findsOneWidget);
       expect(find.byType(BackButton), findsNothing);
 
       await tester.tapAndSettle(find.byTooltip('Close'));
@@ -67,6 +66,7 @@ void main() {
     testWidgets('by link, it keeps Close after rebuilding while another '
         'screen covers it (conventions §11.96)', (tester) async {
       await pumpCryptoTracker(tester, initialLocation: '/coins/bitcoin');
+      await tester.scrollTo(find.text('Add to portfolio'));
       await tester.tapAndSettle(find.text('Add to portfolio'));
 
       // Anything that rebuilds the covered coin must not take its way out
@@ -77,7 +77,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tapAndSettle(find.byType(CloseButton));
 
-      expect(find.text('Coin "bitcoin"'), findsOneWidget);
+      expect(appBarTitled('Bitcoin'), findsOneWidget);
       await tester.tapAndSettle(find.byTooltip('Close'));
       expect(appBarTitled('Market'), findsOneWidget);
     });
@@ -88,7 +88,11 @@ void main() {
         initialLocation: '/coins/wrapped%20bitcoin',
       );
 
-      expect(find.text('Coin "wrapped bitcoin"'), findsOneWidget);
+      // No such coin, but the id the page looked for is the decoded one.
+      expect(
+        find.text('There’s no coin “wrapped bitcoin” in the market.'),
+        findsOneWidget,
+      );
     });
   });
 
@@ -112,12 +116,13 @@ void main() {
     testWidgets("from a coin's page, it starts with that coin", (tester) async {
       await pumpCryptoTracker(tester, initialLocation: '/coins/solana');
 
+      await tester.scrollTo(find.text('Add to portfolio'));
       await tester.tapAndSettle(find.text('Add to portfolio'));
 
       expect(appBarTitled('Add holding'), findsOneWidget);
       expect(find.text('A new holding of "solana".'), findsOneWidget);
       await tester.tapAndSettle(find.byType(CloseButton));
-      expect(find.text('Coin "solana"'), findsOneWidget);
+      expect(appBarTitled('Solana'), findsOneWidget);
     });
 
     testWidgets('by link, a new holding keeps its coin (the query)', (

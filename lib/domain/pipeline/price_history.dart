@@ -36,3 +36,24 @@ Map<String, List<PricePoint>> appendSnapshot(
   }
   return next;
 }
+
+/// [highs] raised by [quotes]: each coin's highest price seen so far.
+///
+/// The other step of the history's `scan`. Unlike the points, a high is
+/// never dropped: it covers the whole session, so the all-time high a coin's
+/// page shows can't fall when an old point leaves the buffer (Correctness
+/// Rule 9). Returns [highs] itself when nothing rose, so a listener comparing
+/// by identity sees no change.
+Map<String, double> raiseHighs(
+  Map<String, double> highs,
+  Map<String, Quote> quotes,
+) {
+  Map<String, double>? next;
+  for (final MapEntry(key: id, value: quote) in quotes.entries) {
+    final high = highs[id];
+    if (high == null || quote.priceUsd > high) {
+      (next ??= {...highs})[id] = quote.priceUsd;
+    }
+  }
+  return next == null ? highs : Map.unmodifiable(next);
+}

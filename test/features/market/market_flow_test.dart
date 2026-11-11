@@ -33,7 +33,7 @@ void main() {
     expect(find.text('2 matches · by price'), findsOneWidget);
 
     await tester.tapAndSettle(find.text('Ethereum Classic'));
-    expect(find.text('Coin "ethereum-classic"'), findsOneWidget);
+    expect(appBarTitled('Ethereum Classic'), findsOneWidget);
 
     // Back on the Market, the search and the sort are still there.
     await tester.tapAndSettle(find.byType(BackButton));

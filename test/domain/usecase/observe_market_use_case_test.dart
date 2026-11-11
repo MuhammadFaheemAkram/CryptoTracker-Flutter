@@ -13,6 +13,7 @@ import 'package:rxdart/rxdart.dart';
 
 import '../../helpers/fakes/fake_market_repository.dart';
 import '../../helpers/fakes/fake_settings_repository.dart';
+import '../../helpers/fakes/fake_watchlist_repository.dart';
 import '../../helpers/fixtures.dart';
 
 // The showcase pipeline with StreamQueue (async's counterpart of Turbine):
@@ -23,7 +24,7 @@ void main() {
   late FakeSettingsRepository settings;
   late BehaviorSubject<String> query;
   late BehaviorSubject<SortOption> sort;
-  late BehaviorSubject<Set<String>> watched;
+  late FakeWatchlistRepository watchlist;
   late StreamQueue<MarketListing> listings;
 
   /// Set when a test takes the rest of the queue as a plain stream (and
@@ -36,22 +37,22 @@ void main() {
     await market.loadMarket();
     query = BehaviorSubject.seeded('');
     sort = BehaviorSubject.seeded(SortOption.rank);
-    watched = BehaviorSubject.seeded(const {});
+    watchlist = FakeWatchlistRepository();
     listings = StreamQueue(
-      ObserveMarketUseCase(ObservePriceMovesUseCase(market), settings)(
-        smallMarket(),
-        query: query,
-        sort: sort,
-        watched: watched,
-        debounce: Duration.zero,
-      ),
+      ObserveMarketUseCase(
+        ObservePriceMovesUseCase(market),
+        settings,
+        watchlist,
+      )(smallMarket(), query: query, sort: sort, debounce: Duration.zero),
     );
   });
 
   tearDown(() async {
-    if (!queueTaken) await listings.cancel();
+    // `immediate`: a test that failed waiting for a listing must not hang
+    // the run here, on the request still pending.
+    if (!queueTaken) await listings.cancel(immediate: true);
     queueTaken = false;
-    await (query.close(), sort.close(), watched.close()).wait;
+    await (query.close(), sort.close(), watchlist.dispose()).wait;
     await (market.dispose(), settings.dispose()).wait;
   });
 
@@ -131,7 +132,7 @@ void main() {
   test('the watchlist marks its coins', () async {
     await listings.next;
 
-    watched.add({'ethereum'});
+    await watchlist.toggle('ethereum');
     final next = await listings.next;
 
     expect(

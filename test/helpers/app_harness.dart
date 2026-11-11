@@ -9,6 +9,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 import 'package:shared_preferences_platform_interface/types.dart';
 
 import 'pump_app.dart';
+import 'test_dependencies.dart';
 
 /// Starts the whole app on the real DI graph, optionally on a deep link.
 /// Pair it with `tearDown(getIt.reset)`.
@@ -38,7 +39,7 @@ Future<void> pumpCryptoTracker(
         const SharedPreferencesOptions(),
       );
     }
-    await configureDependencies();
+    await configureTestDependencies();
   });
   if (marketApi != null) {
     getIt
@@ -69,6 +70,41 @@ extension AppHarness on WidgetTester {
   Future<void> tapAndSettle(Finder finder) async {
     await tap(finder);
     await pumpAndSettle();
+  }
+
+  /// Scrolls [finder] fully into view: `scrollUntilVisible` alone stops as
+  /// soon as a lazy list *builds* the target, which can leave it at the
+  /// viewport's edge, under the tab bar (conventions §11.88).
+  Future<void> scrollTo(Finder finder) async {
+    await scrollUntilVisible(
+      finder,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await ensureVisible(finder);
+    await pumpAndSettle();
+  }
+
+  /// Taps [finder] (a star, Undo: a database write), lets the write run on
+  /// the real event loop, then settles. A drift write started in fake time
+  /// may never finish; its queries' streams answer only on the real loop
+  /// (conventions §11.27, §11.95).
+  Future<void> tapAndWrite(Finder finder) async {
+    await tap(finder);
+    await pump();
+    await settleRealAsync();
+  }
+
+  /// Lets work on the real event loop finish (a database write and the
+  /// queries it wakes), then settles; twice, as a write's answer can
+  /// start another frame's work.
+  Future<void> settleRealAsync() async {
+    for (var i = 0; i < 2; i++) {
+      await runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await pumpAndSettle();
+    }
   }
 
   /// Pauses live prices through the app's own settings, so the ticker's

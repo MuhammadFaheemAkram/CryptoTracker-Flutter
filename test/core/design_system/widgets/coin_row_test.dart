@@ -51,6 +51,30 @@ void main() {
       expect(line.dx, lessThan(tester.getCenter(find.text(r'$67,240.50')).dx));
     });
 
+    testWidgets('keeps its place next to the watchlist star on a phone', (
+      tester,
+    ) async {
+      tester.usePhoneSurface(); // 390 wide: the narrower of today's phones
+      await tester.pumpThemed(
+        CoinRow(
+          rank: 1,
+          symbol: 'btc',
+          name: 'Bitcoin',
+          price: r'$67,240.50',
+          change24hPercent: 2.41,
+          sparkline: week,
+          trailing: WatchStar(
+            coinName: 'Bitcoin',
+            isWatched: false,
+            onPressed: () {},
+          ),
+        ),
+      );
+
+      expect(find.byType(Sparkline), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('is left out on a row too narrow for it', (tester) async {
       tester.view
         ..physicalSize = const Size(320 * 3, 800 * 3)

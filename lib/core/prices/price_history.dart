@@ -6,29 +6,41 @@ import 'package:crypto_tracker/domain/pipeline/price_history.dart';
 import 'package:injectable/injectable.dart';
 import 'package:rxdart/rxdart.dart';
 
-/// Every coin's recent prices, recorded from launch: the live chart's data
-/// (Phase 4).
+/// Every coin's recent prices and its highest price, recorded from launch:
+/// the live chart's data and the all-time high's.
 ///
-/// A `scan` over the ticker: the accumulator is the history so far, and each
-/// snapshot appends a point per coin ([appendSnapshot], capped at
-/// [priceHistoryCapacity]). It starts with the app (an eager singleton) and
-/// keeps listening, so a coin's chart has points the first time it's opened,
-/// even a minute in.
+/// Two `scan`s over the ticker, each with its own accumulator:
+/// - the **points** so far, and each snapshot appends one per coin
+///   ([appendSnapshot], capped at [priceHistoryCapacity]);
+/// - the **highs** so far, and each snapshot raises them ([raiseHighs]);
+///   they're never capped.
+///
+/// It starts with the app (an eager singleton) and keeps listening, so a
+/// coin's chart has points the first time it's opened, even a minute in.
 @singleton
 class PriceHistory {
   PriceHistory(PriceTicker ticker) {
-    _subscription = ticker.quotes
-        .scan<Map<String, List<PricePoint>>>(
-          (history, quotes, _) => appendSnapshot(history, quotes),
-          const {},
-        )
-        .listen(_history.add);
+    _subscriptions = [
+      ticker.quotes
+          .scan<Map<String, List<PricePoint>>>(
+            (history, quotes, _) => appendSnapshot(history, quotes),
+            const {},
+          )
+          .listen(_history.add),
+      ticker.quotes
+          .scan<Map<String, double>>(
+            (highs, quotes, _) => raiseHighs(highs, quotes),
+            const {},
+          )
+          .listen(_highs.add),
+    ];
   }
 
   final _history = BehaviorSubject<Map<String, List<PricePoint>>>.seeded(
     const {},
   );
-  late final StreamSubscription<Map<String, List<PricePoint>>> _subscription;
+  final _highs = BehaviorSubject<Map<String, double>>.seeded(const {});
+  late final List<StreamSubscription<Object>> _subscriptions;
 
   /// [coinId]'s points, oldest first: the history so far at once, then each
   /// time it grows. A tick that didn't touch the coin emits nothing (its
@@ -37,9 +49,15 @@ class PriceHistory {
       .map((history) => history[coinId] ?? const <PricePoint>[])
       .distinct(identical);
 
+  /// [coinId]'s highest price since launch (`null` before its first
+  /// quote): the current high at once, then each time it rises.
+  Stream<double?> watchHigh(String coinId) =>
+      _highs.stream.map((highs) => highs[coinId]).distinct();
+
   @disposeMethod
   Future<void> dispose() async {
-    await _subscription.cancel();
-    await _history.close();
+    await [for (final subscription in _subscriptions) subscription.cancel()]
+        .wait;
+    await (_history.close(), _highs.close()).wait;
   }
 }

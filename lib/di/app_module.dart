@@ -1,6 +1,8 @@
 import 'dart:math';
 
 import 'package:clock/clock.dart';
+import 'package:crypto_tracker/core/database/app_database.dart';
+import 'package:crypto_tracker/core/database/daos/watchlist_dao.dart';
 import 'package:crypto_tracker/core/storage/settings_local_data_source.dart';
 import 'package:flutter/services.dart';
 import 'package:injectable/injectable.dart';
@@ -17,6 +19,15 @@ abstract class AppModule {
   /// The randomness behind the simulated market. Tests use a seeded one.
   @lazySingleton
   Random get random => Random();
+
+  /// One database for the whole app: several connections to the same
+  /// SQLite file would break drift's change notifications. Tests swap it for
+  /// an in-memory one.
+  @lazySingleton
+  AppDatabase get database => AppDatabase();
+
+  @lazySingleton
+  WatchlistDao watchlistDao(AppDatabase database) => database.watchlistDao;
 
   /// The app bundle, where the fake market service reads its JSON.
   @lazySingleton

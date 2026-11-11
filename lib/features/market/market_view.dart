@@ -1,3 +1,4 @@
+import 'package:crypto_tracker/core/common/result.dart';
 import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/core/formatting/money_formatter.dart';
 import 'package:crypto_tracker/domain/model/market_coin.dart';
@@ -169,7 +170,7 @@ class _MarketListState extends State<_MarketList> {
   }
 
   Widget _row(MarketCoin row, MoneyFormatter money) {
-    final MarketCoin(:coin, :quote, :direction) = row;
+    final MarketCoin(:coin, :quote, :direction, :isWatched) = row;
     return CoinRow(
       // Keyed by coin: a re-sort moves rows (and their flash state) instead
       // of rebuilding them, and a tick updates a row in place.
@@ -183,7 +184,22 @@ class _MarketListState extends State<_MarketList> {
       direction: direction,
       tick: quote.updatedAt,
       onTap: () => widget.onOpenCoin(coin.id),
+      trailing: WatchStar(
+        coinName: coin.name,
+        isWatched: isWatched,
+        onPressed: () => _toggleWatch(coin.id),
+      ),
     );
+  }
+
+  /// Stars or unstars a coin. Success needs nothing here: the star fills
+  /// when the pipeline says so. A failure is said.
+  Future<void> _toggleWatch(String coinId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await context.read<MarketCubit>().toggleWatch(coinId);
+    if (result case Err(:final exception)) {
+      showAppSnackBar(messenger, exception.message);
+    }
   }
 
   static String _summary(int count, String query, String sortLabel) {

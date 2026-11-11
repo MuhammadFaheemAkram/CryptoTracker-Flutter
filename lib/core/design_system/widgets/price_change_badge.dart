@@ -42,19 +42,24 @@ class PriceChangeBadge extends StatelessWidget {
     return Semantics(
       label: PercentFormatter.describeChange(percent),
       excludeSemantics: true,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (arrow != null)
-            Icon(
-              arrow,
-              color: color,
-              // Scales with the text, so the arrow keeps up at large sizes.
-              size: MediaQuery.textScalerOf(context)
-                  .scale((textStyle.fontSize ?? 14) * 1.4),
-            ),
-          Text(PercentFormatter.formatChange(percent), style: textStyle),
-        ],
+      // A change never wraps or loses digits: in a space too narrow for it
+      // (the coin page's header at the largest text), it shrinks to fit.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (arrow != null)
+              Icon(
+                arrow,
+                color: color,
+                // Scales with the text, so the arrow keeps up at large sizes.
+                size: MediaQuery.textScalerOf(context)
+                    .scale((textStyle.fontSize ?? 14) * 1.4),
+              ),
+            Text(PercentFormatter.formatChange(percent), style: textStyle),
+          ],
+        ),
       ),
     );
   }

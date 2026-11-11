@@ -13,6 +13,8 @@
 import 'dart:math' as _i407;
 
 import 'package:clock/clock.dart' as _i454;
+import 'package:crypto_tracker/core/database/app_database.dart' as _i36;
+import 'package:crypto_tracker/core/database/daos/watchlist_dao.dart' as _i576;
 import 'package:crypto_tracker/core/network/asset_json_loader.dart' as _i223;
 import 'package:crypto_tracker/core/network/fake_market_api.dart' as _i771;
 import 'package:crypto_tracker/core/network/market_api.dart' as _i253;
@@ -26,20 +28,34 @@ import 'package:crypto_tracker/data/repository/market_repository_impl.dart'
     as _i434;
 import 'package:crypto_tracker/data/repository/settings_repository_impl.dart'
     as _i937;
+import 'package:crypto_tracker/data/repository/watchlist_repository_impl.dart'
+    as _i34;
 import 'package:crypto_tracker/di/app_module.dart' as _i799;
 import 'package:crypto_tracker/domain/repository/market_repository.dart'
     as _i847;
 import 'package:crypto_tracker/domain/repository/settings_repository.dart'
     as _i782;
+import 'package:crypto_tracker/domain/repository/watchlist_repository.dart'
+    as _i585;
 import 'package:crypto_tracker/domain/usecase/load_market_use_case.dart'
     as _i54;
+import 'package:crypto_tracker/domain/usecase/observe_coin_detail_use_case.dart'
+    as _i11;
 import 'package:crypto_tracker/domain/usecase/observe_market_use_case.dart'
     as _i524;
 import 'package:crypto_tracker/domain/usecase/observe_price_moves_use_case.dart'
     as _i128;
+import 'package:crypto_tracker/domain/usecase/observe_watchlist_rows_use_case.dart'
+    as _i171;
 import 'package:crypto_tracker/domain/usecase/settings_use_cases.dart' as _i13;
+import 'package:crypto_tracker/domain/usecase/watchlist_use_cases.dart'
+    as _i301;
+import 'package:crypto_tracker/features/coin_detail/cubit/coin_detail_cubit.dart'
+    as _i16;
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart'
     as _i428;
+import 'package:crypto_tracker/features/watchlist/cubit/watchlist_cubit.dart'
+    as _i137;
 import 'package:flutter/services.dart' as _i281;
 import 'package:get_it/get_it.dart' as _i174;
 import 'package:injectable/injectable.dart' as _i526;
@@ -55,6 +71,7 @@ extension GetItInjectableX on _i174.GetIt {
     final appModule = _$AppModule();
     gh.lazySingleton<_i454.Clock>(() => appModule.clock);
     gh.lazySingleton<_i407.Random>(() => appModule.random);
+    gh.lazySingleton<_i36.AppDatabase>(() => appModule.database);
     gh.lazySingleton<_i281.AssetBundle>(() => appModule.assetBundle);
     await gh.lazySingletonAsync<_i460.SharedPreferencesWithCache>(
       () => appModule.preferences,
@@ -81,6 +98,9 @@ extension GetItInjectableX on _i174.GetIt {
     gh.lazySingleton<_i782.SettingsRepository>(
       () => _i937.SettingsRepositoryImpl(gh<_i406.SettingsLocalDataSource>()),
     );
+    gh.lazySingleton<_i576.WatchlistDao>(
+      () => appModule.watchlistDao(gh<_i36.AppDatabase>()),
+    );
     gh.lazySingleton<_i253.MarketApi>(
       () => _i771.FakeMarketApi(gh<_i223.AssetJsonLoader>()),
     );
@@ -102,6 +122,13 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i253.MarketApi>(),
         gh<_i454.Clock>(),
         gh<_i611.PriceTicker>(),
+        gh<_i469.PriceHistory>(),
+      ),
+    );
+    gh.lazySingleton<_i585.WatchlistRepository>(
+      () => _i34.WatchlistRepositoryImpl(
+        gh<_i576.WatchlistDao>(),
+        gh<_i454.Clock>(),
       ),
     );
     gh.factory<_i54.LoadMarketUseCase>(
@@ -110,9 +137,37 @@ extension GetItInjectableX on _i174.GetIt {
     gh.factory<_i128.ObservePriceMovesUseCase>(
       () => _i128.ObservePriceMovesUseCase(gh<_i847.MarketRepository>()),
     );
+    gh.factory<_i171.ObserveWatchlistRowsUseCase>(
+      () => _i171.ObserveWatchlistRowsUseCase(
+        gh<_i128.ObservePriceMovesUseCase>(),
+        gh<_i585.WatchlistRepository>(),
+        gh<_i782.SettingsRepository>(),
+      ),
+    );
     gh.factory<_i524.ObserveMarketUseCase>(
       () => _i524.ObserveMarketUseCase(
         gh<_i128.ObservePriceMovesUseCase>(),
+        gh<_i782.SettingsRepository>(),
+        gh<_i585.WatchlistRepository>(),
+      ),
+    );
+    gh.factory<_i301.ObserveWatchlistUseCase>(
+      () => _i301.ObserveWatchlistUseCase(gh<_i585.WatchlistRepository>()),
+    );
+    gh.factory<_i301.ToggleWatchUseCase>(
+      () => _i301.ToggleWatchUseCase(gh<_i585.WatchlistRepository>()),
+    );
+    gh.factory<_i301.RemoveFromWatchlistUseCase>(
+      () => _i301.RemoveFromWatchlistUseCase(gh<_i585.WatchlistRepository>()),
+    );
+    gh.factory<_i301.RestoreWatchedCoinUseCase>(
+      () => _i301.RestoreWatchedCoinUseCase(gh<_i585.WatchlistRepository>()),
+    );
+    gh.factory<_i11.ObserveCoinDetailUseCase>(
+      () => _i11.ObserveCoinDetailUseCase(
+        gh<_i128.ObservePriceMovesUseCase>(),
+        gh<_i847.MarketRepository>(),
+        gh<_i585.WatchlistRepository>(),
         gh<_i782.SettingsRepository>(),
       ),
     );
@@ -121,6 +176,23 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i54.LoadMarketUseCase>(),
         gh<_i524.ObserveMarketUseCase>(),
         gh<_i13.SetLivePricesPausedUseCase>(),
+        gh<_i301.ToggleWatchUseCase>(),
+      ),
+    );
+    gh.factoryParam<_i16.CoinDetailCubit, String, dynamic>(
+      (coinId, _) => _i16.CoinDetailCubit(
+        coinId,
+        gh<_i54.LoadMarketUseCase>(),
+        gh<_i11.ObserveCoinDetailUseCase>(),
+        gh<_i301.ToggleWatchUseCase>(),
+      ),
+    );
+    gh.factory<_i137.WatchlistCubit>(
+      () => _i137.WatchlistCubit(
+        gh<_i54.LoadMarketUseCase>(),
+        gh<_i171.ObserveWatchlistRowsUseCase>(),
+        gh<_i301.RemoveFromWatchlistUseCase>(),
+        gh<_i301.RestoreWatchedCoinUseCase>(),
       ),
     );
     return this;

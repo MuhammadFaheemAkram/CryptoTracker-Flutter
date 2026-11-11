@@ -11,6 +11,7 @@ import 'package:crypto_tracker/domain/usecase/load_market_use_case.dart';
 import 'package:crypto_tracker/domain/usecase/observe_market_use_case.dart';
 import 'package:crypto_tracker/domain/usecase/observe_price_moves_use_case.dart';
 import 'package:crypto_tracker/domain/usecase/settings_use_cases.dart';
+import 'package:crypto_tracker/domain/usecase/watchlist_use_cases.dart';
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart';
 import 'package:crypto_tracker/features/market/cubit/market_state.dart';
 import 'package:fake_async/fake_async.dart';
@@ -18,7 +19,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../helpers/fakes/fake_market_repository.dart';
 import '../../helpers/fakes/fake_settings_repository.dart';
+import '../../helpers/fakes/fake_watchlist_repository.dart';
 import '../../helpers/fixtures.dart';
+import '../../helpers/result_matchers.dart';
 
 // The Market's Cubit on the real pipeline (ObserveMarketUseCase), with the
 // market and the settings faked. Everything runs in fake time, so the
@@ -34,6 +37,7 @@ import '../../helpers/fixtures.dart';
 void main() {
   late FakeMarketRepository market;
   late FakeSettingsRepository settings;
+  late FakeWatchlistRepository watchlist;
   late MarketCubit cubit;
   late List<MarketState> states;
 
@@ -45,10 +49,16 @@ void main() {
   }) {
     market = FakeMarketRepository(result: result)..gate = gate;
     settings = FakeSettingsRepository();
+    watchlist = FakeWatchlistRepository();
     cubit = MarketCubit(
       LoadMarketUseCase(market),
-      ObserveMarketUseCase(ObservePriceMovesUseCase(market), settings),
+      ObserveMarketUseCase(
+        ObservePriceMovesUseCase(market),
+        settings,
+        watchlist,
+      ),
       SetLivePricesPausedUseCase(settings),
+      ToggleWatchUseCase(watchlist),
     );
     states = [];
     cubit.stream.listen(states.add);
@@ -66,6 +76,7 @@ void main() {
   tearDown(() async {
     await market.dispose();
     await settings.dispose();
+    await watchlist.dispose();
   });
 
   test('loads, then shows the live market at once (no waiting for a '
@@ -218,16 +229,57 @@ void main() {
     });
   });
 
+  test('the star writes the watchlist; the filled star comes back through '
+      'the pipeline', () {
+    fakeAsync((async) {
+      start(async);
+      Result<bool>? result;
+
+      unawaited(cubit.toggleWatch('ethereum').then((r) => result = r));
+      async.flushMicrotasks();
+
+      expect(result, isOk(true));
+      expect(watchlist.ids, ['ethereum']);
+      expect(
+        [
+          for (final row in listing().rows)
+            if (row.isWatched) row.coin.id,
+        ],
+        ['ethereum'],
+      );
+    });
+  });
+
+  test('a star that can\'t be saved says why, and stars nothing', () {
+    fakeAsync((async) {
+      start(async);
+      watchlist.failWrites = true;
+      Result<bool>? result;
+
+      unawaited(cubit.toggleWatch('ethereum').then((r) => result = r));
+      async.flushMicrotasks();
+
+      expect(result, isErrOf<StorageException>());
+      expect(listing().rows.any((row) => row.isWatched), isFalse);
+    });
+  });
+
   group('in real time', () {
     const debounce = Duration(milliseconds: 40);
 
     Future<void> startLive() async {
       market = FakeMarketRepository();
       settings = FakeSettingsRepository();
+      watchlist = FakeWatchlistRepository();
       cubit = MarketCubit(
         LoadMarketUseCase(market),
-        ObserveMarketUseCase(ObservePriceMovesUseCase(market), settings),
+        ObserveMarketUseCase(
+          ObservePriceMovesUseCase(market),
+          settings,
+          watchlist,
+        ),
         SetLivePricesPausedUseCase(settings),
+        ToggleWatchUseCase(watchlist),
         debounce: debounce,
       );
       states = [];
@@ -266,6 +318,31 @@ void main() {
         states.whereType<MarketReady>().map((s) => s.listing.query),
         isNot(contains('sol')),
       );
+    });
+
+    test('closed while the seed was on its way: it never subscribes (the '
+        'seed lands during close\'s own awaits)', () async {
+      market = FakeMarketRepository();
+      settings = FakeSettingsRepository();
+      watchlist = FakeWatchlistRepository();
+      cubit = MarketCubit(
+        LoadMarketUseCase(market),
+        ObserveMarketUseCase(
+          ObservePriceMovesUseCase(market),
+          settings,
+          watchlist,
+        ),
+        SetLivePricesPausedUseCase(settings),
+        ToggleWatchUseCase(watchlist),
+        debounce: debounce,
+      );
+      final loading = cubit.load();
+      await cubit.close();
+
+      await expectLater(loading, completes);
+      market.emitQuotes({...market.currentQuotes});
+      await pumpEventQueue();
+      expect(cubit.state, const MarketState.loading());
     });
 
     test('close: nothing after it, and the Cubit is closed', () async {

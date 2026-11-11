@@ -30,6 +30,12 @@ final class DataFormatException extends AppException {
     : super("The market's data looks damaged. Please try again.");
 }
 
+/// A change couldn't be saved on the device (the watchlist, a holding).
+final class StorageException extends AppException {
+  const StorageException()
+    : super("Couldn't save that change. Please try again.");
+}
+
 /// Anything unexpected that isn't one of the cases above.
 final class UnknownException extends AppException {
   const UnknownException() : super('Something went wrong. Please try again.');

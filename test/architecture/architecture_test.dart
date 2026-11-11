@@ -3,8 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 // Rules the analyzer can't express, checked over the source tree. Each
-// phase adds the rules for the layers it brings (drift's imports in
-// Phase 4, for one).
+// phase adds the rules for the layers it brings (drift's, from Phase 4).
 void main() {
   final sources = Directory('lib')
       .listSync(recursive: true)
@@ -110,6 +109,37 @@ void main() {
       filesContaining('crypto_tracker/core/network/', among: outside),
       isEmpty,
     );
+  });
+
+  test('only the data layer and the DI root know the database: rows never '
+      'reach the domain or the screens', () {
+    final outside = sources.where(
+      (file) =>
+          !file.path.startsWith('lib/core/database/') &&
+          !file.path.startsWith('lib/data/') &&
+          !file.path.startsWith('lib/di/'),
+    );
+    expect(filesContaining("'package:drift", among: outside), isEmpty);
+    expect(
+      filesContaining('crypto_tracker/core/database/', among: outside),
+      isEmpty,
+    );
+  });
+
+  test('the database is plain storage: no Flutter, no JSON, no screens', () {
+    for (final forbidden in [
+      "'package:flutter/",
+      "'package:material_ui/",
+      "'package:json_annotation/",
+      'crypto_tracker/features/',
+      'crypto_tracker/domain/',
+    ]) {
+      expect(
+        filesContaining(forbidden, among: under('core/database')),
+        isEmpty,
+        reason: forbidden,
+      );
+    }
   });
 
   test('state management stays in the screens (and the app)', () {

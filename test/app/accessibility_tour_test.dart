@@ -65,6 +65,7 @@ void main() {
         ('Add holding', '/holdings/new?coin-id=bitcoin'),
         ('Edit holding', '/holdings/1/edit'),
         ('Page not found', '/nowhere'),
+        ('Coin not found', '/coins/not-a-coin'),
       ]) {
         testWidgets(name, (tester) async {
           await open(tester, location);
@@ -116,6 +117,52 @@ void main() {
 
       testWidgets('Market, paused', (tester) async {
         await open(tester, '/market');
+        expect(find.byType(PausedChip), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Watchlist, starred coins and the Undo bar', (tester) async {
+        await open(tester, '/market');
+        await tester.tapAndWrite(find.byTooltip('Add Bitcoin to watchlist'));
+        await tester.tapAndWrite(find.byTooltip('Add Tether to watchlist'));
+        await tester.tapAndSettle(destination('Watchlist'));
+        await tester.tapAndWrite(
+          find.byTooltip('Remove Bitcoin from watchlist'),
+        );
+        expect(find.text('Undo'), findsOneWidget);
+        expect(find.text('Tether'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Coin, loading', (tester) async {
+        await open(
+          tester,
+          '/coins/bitcoin',
+          marketApi: ScriptedMarketApi()..gate = Completer<void>(),
+          settle: false,
+        );
+        expect(find.text('Loading the coin…'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets('Coin, live chart, caught mid-flash', (tester) async {
+        await open(tester, '/coins/bitcoin', livePrices: true, settle: false);
+        await tester.pump(const Duration(seconds: 1)); // the seed
+        await tester.pump(const Duration(seconds: 2)); // a tick
+        await tester.pump(const Duration(seconds: 2)); // another
+        await tester.runAsync(pumpEventQueue); // the history (§11.123)
+        await tester.pump(const Duration(milliseconds: 50)); // flashing
+        expect(find.text(PriceLineChart.collectingMessage), findsNothing);
+        await expectAccessible(tester);
+        await tester.pauseMarket();
+      });
+
+      testWidgets('Coin, 7 days, starred, paused', (tester) async {
+        await open(tester, '/coins/bitcoin');
+        await tester.tapAndWrite(find.byTooltip('Add Bitcoin to watchlist'));
+        await tester.tapAndSettle(find.text('7 days'));
+        expect(find.byTooltip('Remove Bitcoin from watchlist'), findsOneWidget);
+        expect(find.textContaining('over 7 days'), findsWidgets);
         expect(find.byType(PausedChip), findsOneWidget);
         await expectAccessible(tester);
       });

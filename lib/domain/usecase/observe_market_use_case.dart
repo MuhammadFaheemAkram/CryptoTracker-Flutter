@@ -1,11 +1,11 @@
-import 'package:crypto_tracker/domain/model/app_settings.dart';
-import 'package:crypto_tracker/domain/model/currency.dart';
 import 'package:crypto_tracker/domain/model/market_listing.dart';
 import 'package:crypto_tracker/domain/model/market_seed.dart';
 import 'package:crypto_tracker/domain/model/sort_option.dart';
 import 'package:crypto_tracker/domain/pipeline/market_rows.dart';
+import 'package:crypto_tracker/domain/pipeline/price_display.dart';
 import 'package:crypto_tracker/domain/pipeline/settled_query.dart';
 import 'package:crypto_tracker/domain/repository/settings_repository.dart';
+import 'package:crypto_tracker/domain/repository/watchlist_repository.dart';
 import 'package:crypto_tracker/domain/usecase/observe_price_moves_use_case.dart';
 import 'package:injectable/injectable.dart';
 import 'package:rxdart/rxdart.dart';
@@ -16,11 +16,11 @@ const searchDebounce = Duration(milliseconds: 300);
 /// The market list, live: the showcase pipeline.
 ///
 /// ```
-/// snapshots ─────────────────────────────┐   (one per tick, with directions)
+/// snapshots ─────────────────────────────────┐   (one per tick, with directions)
 /// query ─ trim ─ switchMap(timer) ─ distinct ┤   (settled after 300 ms)
-/// sort ─ distinct ────────────────────────┼─ combineLatest5 ─▶ buildMarketRows ─▶ MarketListing
-/// settings ─ (currency, paused) ─ distinct ┤
-/// watchlist ─────────────────────────────┘   (Phase 4; nothing yet)
+/// sort ─ distinct ───────────────────────────┼─ combineLatest5 ─▶ buildMarketRows ─▶ MarketListing
+/// settings ─ priceDisplay ───────────────────┤   (currency, paused)
+/// watched ids (drift) ─ toSet ───────────────┘   (the stars)
 /// ```
 ///
 /// - **`combineLatest`, not `zip`:** `zip` would pair the n-th tick with the
@@ -34,10 +34,11 @@ const searchDebounce = Duration(milliseconds: 300);
 ///   "new" sort, and a theme change doesn't reach the market at all.
 @injectable
 class ObserveMarketUseCase {
-  const ObserveMarketUseCase(this._moves, this._settings);
+  const ObserveMarketUseCase(this._moves, this._settings, this._watchlist);
 
   final ObservePriceMovesUseCase _moves;
   final SettingsRepository _settings;
+  final WatchlistRepository _watchlist;
 
   /// The listing for [seed]'s coins, for the user's [query] (each
   /// keystroke) and [sort], recomputed on every change of any input.
@@ -45,14 +46,13 @@ class ObserveMarketUseCase {
     MarketSeed seed, {
     required Stream<String> query,
     required Stream<SortOption> sort,
-    Stream<Set<String>>? watched,
     Duration debounce = searchDebounce,
   }) => Rx.combineLatest5(
     _moves(),
     query.settled(debounce),
     sort.distinct(),
-    _settings.watch().map(_marketPart).distinct(),
-    watched ?? Stream.value(const <String>{}),
+    _settings.watch().priceDisplay(),
+    _watchlist.watchIds().map((ids) => ids.toSet()),
     (snapshot, query, sort, settings, watched) => MarketListing(
       rows: buildMarketRows(
         coins: seed.coins,
@@ -69,8 +69,4 @@ class ObserveMarketUseCase {
       isPaused: settings.paused,
     ),
   );
-
-  /// The only settings the market cares about.
-  static ({Currency currency, bool paused}) _marketPart(AppSettings settings) =>
-      (currency: settings.currency, paused: settings.livePricesPaused);
 }
