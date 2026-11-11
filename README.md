@@ -34,6 +34,24 @@ No screen keeps its own copy of a price, and no list is patched by hand.
 
 ---
 
+## ⏱️ How the simulated ticker works
+
+- **It starts from the seed:** 32 coins with real-looking prices, loaded once at launch.
+- **Each tick:**
+  - every price takes one step of a random walk: up to ±1.5 % (±0.05 % for stablecoins), pulled 2 % back towards where it started, so a long session stays plausible;
+  - a tick comes every 2 seconds by default (1, 2 or 5 in Settings, Phase 6).
+- **The 24 h change is derived, never accumulated:**
+  - each quote keeps the price 24 h ago from the seed;
+  - the change is always `(price / open − 1) × 100`, however many ticks there have been (both native specs add each tick's movement to it, which drifts).
+- **It stops when nobody can see it:**
+  - in the background (`AppLifecycleListener`), and when the user pauses it (the Market's Pause button: moving content must be pausable, WCAG 2.2.2);
+  - it carries on from the same prices when it resumes.
+- **It's a `BehaviorSubject`:** a screen opened mid-session gets the current prices at once, then every tick.
+
+The details, with diagrams: [STREAM_PIPELINES.md](docs/STREAM_PIPELINES.md).
+
+---
+
 ## 📋 Project Status
 
 Built in **strict, reviewable phases**. Each phase ends with:
@@ -47,8 +65,8 @@ Built in **strict, reviewable phases**. Each phase ends with:
 |------:|-------|:------:|
 | 1 | Foundation: the project, the design system (market colors, `CoinBadge`, `CoinRow`), typed routes and the 4-tab shell, CI | ✅ Done |
 | 2 | Models, the bundled seed and a static Market (sort, search, sparklines) | ✅ Done |
-| 3 | **Live prices with Dart streams:** the `PriceTicker`, the five-input pipeline, debounce, `scan` flashes, the price history | ⏳ Next |
-| 4 | Watchlist (drift v1) and Coin Detail with a hand-drawn live chart | ⬜ |
+| 3 | **Live prices with Dart streams:** the `PriceTicker`, the five-input pipeline, debounce, `scan` flashes, the price history, Pause | ✅ Done |
+| 4 | Watchlist (drift v1) and Coin Detail with a hand-drawn live chart | ⏳ Next |
 | 5 | Portfolio with live valuation (drift v2), the allocation donut, the holding form | ⬜ |
 | 6 | Settings (currency, interval, appearance), the documentation set, the release check | ⬜ |
 
@@ -79,11 +97,12 @@ Built in **strict, reviewable phases**. Each phase ends with:
 | Models | `freezed` + `json_serializable` | Immutable models with value equality; checked DTOs | 2 |
 | Formatting | `intl` | Prices in each currency, significant digits under one unit, compact amounts | 2 |
 | Time | `clock` | An injectable "now" (fixed in tests) | 2 |
-| **Streams** | **Dart `Stream` + `rxdart`** | `BehaviorSubject`, `combineLatest`, `debounceTime`, `scan`, `switchMap` | 3 |
+| **Streams** | **Dart `Stream` + `rxdart`** | `BehaviorSubject`, `combineLatest5`, `scan`, `switchMap`, `distinct` (see [STREAM_PIPELINES.md](docs/STREAM_PIPELINES.md)) | 3 |
+| Preferences | `shared_preferences` (`SharedPreferencesWithCache`) | The settings, read before the first frame | 3 |
 | Database | `drift` | The watchlist and holdings, observed as streams | 4 |
 | Charts | `CustomPainter` | Hand-drawn sparkline, line chart and donut | 3–5 |
 
-The rest arrive with their phase (`shared_preferences`, `package_info_plus`; tests: `async`'s `StreamQueue`). Tests so far use `flutter_test`, `bloc_test`, `mocktail` and `fake_async`.
+`package_info_plus` arrives with Settings (Phase 6). Tests use `flutter_test`, `bloc_test`, `mocktail`, `fake_async` and `async`'s `StreamQueue` (the Turbine of Dart).
 
 ---
 
@@ -111,16 +130,18 @@ Repository ── PriceTicker (BehaviorSubject: the live quotes)
 
 ```
 lib/
-├── main.dart                     # configureDependencies(), runApp
-├── app/                          # CryptoTrackerApp (MaterialApp.router, themes)
+├── main.dart                     # await configureDependencies() (preferences open), runApp
+├── app/                          # CryptoTrackerApp (MaterialApp.router, themes), LiveTicker (lifecycle)
 ├── core/
 │   ├── common/                   # Result, AppException
 │   ├── design_system/            # AppTheme, AppColors, tokens, widgets/ (CoinRow, CoinBadge, …), charts/ (Sparkline)
 │   ├── formatting/               # MoneyFormatter, PercentFormatter (pure Dart)
 │   ├── navigation/               # typed routes, the router, the Close fallback
-│   └── network/                  # MarketApi, FakeMarketApi, AssetJsonLoader, dto/
-├── data/                         # mappers (checked), MarketRepositoryImpl (load once)
-├── domain/                       # models, pipeline/ (buildMarketRows), repository contracts, use cases
+│   ├── network/                  # MarketApi, FakeMarketApi, AssetJsonLoader, dto/
+│   ├── prices/                   # PriceTicker, RandomWalk, PriceHistory, TickerScheduler (the engine)
+│   └── storage/                  # SettingsLocalDataSource (SharedPreferencesWithCache)
+├── data/                         # mappers (checked), MarketRepositoryImpl (load once, seeds the ticker), settings
+├── domain/                       # models, pipeline/ (pure pieces), repository contracts, use cases (the pipelines)
 ├── di/                           # injection.dart, AppModule
 └── features/
     ├── shell/                    # the 4-tab NavigationBar
@@ -180,12 +201,22 @@ fvm flutter test
   - `CoinRow` is one button for screen readers, stacks above 130 % text, and cuts a long name, never the price.
 - **Formatting:** the sign and the arrow always agree (checked across every rounding boundary from −3 % to +3 %); prices under one unit keep four significant digits; every currency converts.
 - **The data:** the bundled seed (32 coins, ranks 1–32, exactly three stablecoins); mappers that reject every damaged value; a repository that loads once, shares a load in flight, retries after a failure, and lets bugs through.
-- **The Market:** `buildMarketRows` (search × sort, ties by rank); the Cubit with `bloc_test`; the view in every state with `MockCubit`; flows on the real DI graph.
+- **The streams:**
+  - the ticker, the debounce, the history and the scheduler in fake time;
+  - the market pipeline with `StreamQueue` (each of its five inputs);
+  - one state per tick (no glitch);
+  - the 24 h change after 500 ticks is still exact.
+- **The Market:**
+  - `buildMarketRows` (search × sort, ties by rank);
+  - the Cubit on the real pipeline;
+  - the view in every state with `MockCubit`;
+  - flows on the real DI graph (it ticks; Pause stops it; Resume restarts it);
+  - flashes only on new ticks, and none with reduced motion.
 - **Navigation:** the tabs, a coin above them, the holding form as a full-screen dialog, deep links with Close, encoded ids, not found.
 - **The accessibility tour:** every screen, light and dark, at 200 % text.
 - **Architecture rules:** the domain and the formatters are plain Dart; the design system knows no screens; screens never reach the data layer; `getIt` only where the conventions allow it.
 
-**252 tests** after Phase 2.
+**356 tests** after Phase 3.
 
 ---
 
@@ -193,8 +224,9 @@ fvm flutter test
 
 - [Phase 1 summary](docs/PHASE_1_SUMMARY.md): the foundation, the market colors and their contrast, `CoinBadge` and `CoinRow`, the routes
 - [Phase 2 summary](docs/PHASE_2_SUMMARY.md): the models (a derived 24 h change), the seed, checked mappers, a repository that loads once, the static Market
+- [Phase 3 summary](docs/PHASE_3_SUMMARY.md): the live market, every stream operator in it, Pause, and two fake-time traps
 
-`docs/STREAM_PIPELINES.md` (every pipeline as a marble diagram, with a Flow ↔ Combine ↔ Dart table) arrives with Phase 3.
+**[STREAM_PIPELINES.md](docs/STREAM_PIPELINES.md):** every pipeline as a marble diagram, why each operator, how they're tested, and the Flow ↔ Combine ↔ Dart table.
 
 ---
 
@@ -206,7 +238,7 @@ Phase 6 collects them.
 
 ## 🗺️ Roadmap
 
-Phases 3–6 above. Later: a real price feed (a WebSocket) behind the same stream, price alerts, transactions instead of holdings.
+Phases 4–6 above. Later: a real price feed (a WebSocket) behind the same stream, price alerts, transactions instead of holdings.
 
 ---
 

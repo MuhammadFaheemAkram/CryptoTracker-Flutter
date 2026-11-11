@@ -123,12 +123,12 @@ return ready(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  loading,TResult Function( String message)?  error,TResult Function( List<MarketCoin> rows,  String query,  SortOption sort)?  ready,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  loading,TResult Function( String message)?  error,TResult Function( MarketListing listing)?  ready,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case MarketLoading() when loading != null:
 return loading();case MarketError() when error != null:
 return error(_that.message);case MarketReady() when ready != null:
-return ready(_that.rows,_that.query,_that.sort);case _:
+return ready(_that.listing);case _:
   return orElse();
 
 }
@@ -146,12 +146,12 @@ return ready(_that.rows,_that.query,_that.sort);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  loading,required TResult Function( String message)  error,required TResult Function( List<MarketCoin> rows,  String query,  SortOption sort)  ready,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  loading,required TResult Function( String message)  error,required TResult Function( MarketListing listing)  ready,}) {final _that = this;
 switch (_that) {
 case MarketLoading():
 return loading();case MarketError():
 return error(_that.message);case MarketReady():
-return ready(_that.rows,_that.query,_that.sort);}
+return ready(_that.listing);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -165,12 +165,12 @@ return ready(_that.rows,_that.query,_that.sort);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  loading,TResult? Function( String message)?  error,TResult? Function( List<MarketCoin> rows,  String query,  SortOption sort)?  ready,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  loading,TResult? Function( String message)?  error,TResult? Function( MarketListing listing)?  ready,}) {final _that = this;
 switch (_that) {
 case MarketLoading() when loading != null:
 return loading();case MarketError() when error != null:
 return error(_that.message);case MarketReady() when ready != null:
-return ready(_that.rows,_that.query,_that.sort);case _:
+return ready(_that.listing);case _:
   return null;
 
 }
@@ -282,18 +282,10 @@ as String,
 
 
 class MarketReady implements MarketState {
-  const MarketReady({required  List<MarketCoin> rows, required this.query, required this.sort}): _rows = rows;
+  const MarketReady(this.listing);
   
 
- final  List<MarketCoin> _rows;
- List<MarketCoin> get rows {
-  if (_rows is EqualUnmodifiableListView) return _rows;
-  // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_rows);
-}
-
- final  String query;
- final  SortOption sort;
+ final  MarketListing listing;
 
 /// Create a copy of MarketState
 /// with the given fields replaced by the non-null parameter values.
@@ -305,18 +297,18 @@ $MarketReadyCopyWith<MarketReady> get copyWith => _$MarketReadyCopyWithImpl<Mark
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is MarketReady&&const DeepCollectionEquality().equals(other.rows, _rows)&&(identical(other.query, query) || other.query == query)&&(identical(other.sort, sort) || other.sort == sort));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is MarketReady&&(identical(other.listing, listing) || other.listing == listing));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_rows),query,sort);
+    return Object.hash(runtimeType,listing);
 }
 
 @override
 String toString() {
-    return 'MarketState.ready(rows: $rows, query: $query, sort: $sort)';
+    return 'MarketState.ready(listing: $listing)';
 }
 
 
@@ -327,11 +319,11 @@ abstract mixin class $MarketReadyCopyWith<$Res> implements $MarketStateCopyWith<
   factory $MarketReadyCopyWith(MarketReady value, $Res Function(MarketReady) _then) = _$MarketReadyCopyWithImpl;
 @useResult
 $Res call({
- List<MarketCoin> rows, String query, SortOption sort
+ MarketListing listing
 });
 
 
-
+$MarketListingCopyWith<$Res> get listing;
 
 }
 /// @nodoc
@@ -344,16 +336,23 @@ class _$MarketReadyCopyWithImpl<$Res>
 
 /// Create a copy of MarketState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? rows = null,Object? query = null,Object? sort = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? listing = null,}) {
   return _then(MarketReady(
-rows: null == rows ? _self._rows : rows // ignore: cast_nullable_to_non_nullable
-as List<MarketCoin>,query: null == query ? _self.query : query // ignore: cast_nullable_to_non_nullable
-as String,sort: null == sort ? _self.sort : sort // ignore: cast_nullable_to_non_nullable
-as SortOption,
+null == listing ? _self.listing : listing // ignore: cast_nullable_to_non_nullable
+as MarketListing,
   ));
 }
 
-
+/// Create a copy of MarketState
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$MarketListingCopyWith<$Res> get listing {
+  
+  return $MarketListingCopyWith<$Res>(_self.listing, (value) {
+    return _then(_self.copyWith(listing: value));
+  });
+}
 }
 
 // dart format on

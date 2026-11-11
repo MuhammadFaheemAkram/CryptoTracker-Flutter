@@ -134,6 +134,24 @@ void main() {
     expect(filesContaining(RegExp(r'\bgetIt\b'), among: elsewhere), isEmpty);
   });
 
+  test('one ticker: only PriceTicker runs a periodic timer (every price '
+      'comes from it)', () {
+    expect(filesContaining('Timer.periodic'), [
+      'lib/core/prices/price_ticker.dart',
+    ]);
+  });
+
+  test('prices move in core/prices only: no screen or repository makes up '
+      'its own (the walk is used by the ticker alone)', () {
+    expect(
+      filesContaining('RandomWalk'),
+      unorderedEquals([
+        'lib/core/prices/random_walk.dart',
+        'lib/core/prices/price_ticker.dart',
+      ]),
+    );
+  });
+
   test('no print(): the app has nothing to log to a console', () {
     expect(filesContaining(RegExp(r'(^|[^.\w])print\(')), isEmpty);
   });

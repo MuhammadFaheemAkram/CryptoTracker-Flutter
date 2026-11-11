@@ -1,5 +1,8 @@
+import 'package:crypto_tracker/app/live_ticker.dart';
 import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/core/navigation/app_router.dart';
+import 'package:crypto_tracker/core/prices/ticker_scheduler.dart';
+import 'package:crypto_tracker/di/injection.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -7,9 +10,9 @@ import 'package:material_ui/material_ui.dart';
 ///
 /// This `State` owns the router and disposes it. The router is created once,
 /// not in `build`: a new router on every rebuild would reset navigation.
-/// The app-scoped pieces go here, above `MaterialApp.router`: `LiveTicker`
-/// (Phase 3: it starts and stops the price ticker) and `SettingsCubit`
-/// (Phase 6: the theme and the currency).
+/// The app-scoped pieces go here, above `MaterialApp.router`: [LiveTicker]
+/// (it starts and stops the price ticker) and, in Phase 6, `SettingsCubit`
+/// (the theme).
 class CryptoTrackerApp extends StatefulWidget {
   const CryptoTrackerApp({super.key, this.initialLocation});
 
@@ -33,12 +36,15 @@ class _CryptoTrackerAppState extends State<CryptoTrackerApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'CryptoTracker',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      routerConfig: _router,
+    return LiveTicker(
+      scheduler: getIt<TickerScheduler>(),
+      child: MaterialApp.router(
+        title: 'CryptoTracker',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
+        routerConfig: _router,
+      ),
     );
   }
 }

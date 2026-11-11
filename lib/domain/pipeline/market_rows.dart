@@ -1,15 +1,17 @@
 import 'package:crypto_tracker/domain/model/coin.dart';
 import 'package:crypto_tracker/domain/model/market_coin.dart';
+import 'package:crypto_tracker/domain/model/price_direction.dart';
 import 'package:crypto_tracker/domain/model/quote.dart';
 import 'package:crypto_tracker/domain/model/sort_option.dart';
 
-/// The market list, derived from its inputs: the coins, their quotes, what
-/// was searched for and how to sort.
+/// The market list, derived from its inputs: the coins, their quotes and
+/// which way each moved, what was searched for, how to sort, and which coins
+/// are watched.
 ///
-/// A pure function, so it's tested without streams or widgets. Phase 3
-/// calls it inside `Rx.combineLatest` on every tick, every keystroke (after
-/// the debounce) and every sort change: the list is always recomputed from
-/// the inputs, never patched (the one rule).
+/// A pure function, so it's tested without streams or widgets. The market
+/// pipeline calls it inside `Rx.combineLatest5` on every tick, every settled
+/// query, every sort change: the list is always recomputed from the inputs,
+/// never patched (the one rule).
 ///
 /// A coin without a quote is left out: it has no price to show.
 List<MarketCoin> buildMarketRows({
@@ -17,11 +19,18 @@ List<MarketCoin> buildMarketRows({
   required Map<String, Quote> quotes,
   String query = '',
   SortOption sort = SortOption.rank,
+  Map<String, PriceDirection> directions = const {},
+  Set<String> watched = const {},
 }) {
   final rows = [
     for (final coin in coins)
       if (quotes[coin.id] case final quote? when matchesQuery(coin, query))
-        MarketCoin(coin: coin, quote: quote),
+        MarketCoin(
+          coin: coin,
+          quote: quote,
+          direction: directions[coin.id] ?? PriceDirection.flat,
+          isWatched: watched.contains(coin.id),
+        ),
   ];
   return rows..sort(_comparators[sort]);
 }

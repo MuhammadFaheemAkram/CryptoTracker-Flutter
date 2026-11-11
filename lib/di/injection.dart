@@ -14,8 +14,7 @@ final GetIt getIt = GetIt.instance;
 /// `AppEnvironment` in the iOS one).
 ///
 /// `injectable` generates `getIt.init()` from the annotations under `lib/`.
-/// It's empty until Phase 2 registers the market's data layer; from Phase 3
-/// it turns async, when the preferences must be open before the first frame
-/// (`@preResolve`).
+/// It's async: the preferences are opened before the first frame
+/// (`@preResolve`, in `AppModule`).
 @InjectableInit()
-void configureDependencies() => getIt.init();
+Future<GetIt> configureDependencies() => getIt.init();

@@ -1,0 +1,267 @@
+# Stream pipelines
+
+How CryptoTracker uses Dart streams: every pipeline in the app, drawn as a marble diagram, with the operators it uses and why each one is there.
+
+This is the Flutter counterpart of the Android edition's `FLOW_PIPELINES.md` (Kotlin Flow) and the iOS edition's `COMBINE_PIPELINES.md` (Combine). The [operator table](#flow--combine--dart) at the end maps the three.
+
+> **Version 1 (Phase 3):** the ticker, price moves, the search, the market, the price history, and the settings driving the ticker. Phase 4 adds a coin's page and the watchlist; Phase 5 the portfolio.
+
+---
+
+## The one rule
+
+```
+One PriceTicker owns the live quotes: a stream that always has a current value.
+Every price on every screen is DERIVED from it, by a stream pipeline.
+No screen keeps its own copy of a price, and no list is patched by hand.
+```
+
+**`Future` or `Stream`?**
+- A `Future` is one answer: the seed is loaded once (`MarketRepository.loadMarket()`).
+- A `Stream` is a value over time: the prices, the settings, what the user types. Everything that changes while you look at it is a stream; everything that doesn't is a `Future`.
+
+---
+
+## Vocabulary
+
+| Term | Meaning | Here |
+|---|---|---|
+| **Single-subscription** stream | One listener, ever. Usually *cold*: the work starts when you listen | `TimerStream`, a `StreamController()` |
+| **Broadcast** stream | Any number of listeners; a listener sees only what's emitted after it joins | `StreamController.broadcast()` |
+| **Hot** stream | Produces whether or not anyone listens; listeners share it | the ticker |
+| **Cold** stream | Starts per listener, when it listens | `Stream.value`, `TimerStream`, each use-case pipeline |
+| **`BehaviorSubject`** (rxdart) | A broadcast stream that **remembers its latest value**: a new listener gets it at once, and `.value` reads it synchronously | the ticker, the settings, the Cubit's query and sort |
+| **`ValueStream`** | The read-only view of a `BehaviorSubject` | `PriceTicker.quotes` |
+
+**Why a `BehaviorSubject` for the market:**
+- A screen that opens a minute into the session (the Watchlist, a coin's page) must see the prices *now*.
+- A plain broadcast stream would leave it with nothing until the next tick, up to five seconds.
+- The `BehaviorSubject` replays the latest snapshot to each new listener. That makes it Kotlin's `StateFlow` and Combine's `CurrentValueSubject`.
+
+**Reading the diagrams:**
+- `──a──b──▶` is a stream over time: `a`, then `b`;
+- `|` is the stream ending;
+- one row per stream, with time running left to right on the same scale.
+
+---
+
+## 1. The ticker: a hot `BehaviorSubject`
+
+`core/prices/price_ticker.dart`
+
+```
+seed(Q0)   start(2 s)         tick        tick        stop()   start(1 s)    tick
+   │          │                 │           │           │         │           │
+quotes: ──Q0──────────────────Q1──────────Q2───────────────────────────────Q3──▶
+          ▲ a new listener here gets Q0 at once; one joining after Q2 gets Q2
+```
+
+- **`seed(MarketSeed)`:** the seed's quotes become the first snapshot, once. A second seed is ignored: only a new launch starts the market again.
+- **`start(interval)`:** cancels any timer, then `Timer.periodic(interval, tick)`. A restart (a new interval) is one timer and **no jump**: it carries on from the current prices.
+- **`tick()`:**
+  - every quote moves one step of the `RandomWalk` (±1.5 %, stablecoins ±0.05 %, pulled 2 % back towards the start), stamped with the injected `Clock`;
+  - **`open24hUsd` never changes**, so the 24 h change is always `(price / open − 1) × 100`;
+  - every snapshot is an unmodifiable map.
+- **Hot:** it ticks whether anyone listens or not. That's how the price history records from launch.
+
+Its **lifetime** is decided by a small pipeline of its own, [§6](#6-settings--the-ticker-switchmap).
+
+---
+
+## 2. Price moves: `scan`
+
+`domain/usecase/observe_price_moves_use_case.dart` + `domain/pipeline/price_directions.dart`
+
+```
+quotes:     ──Q0────────Q1────────Q2────────▶
+scan:       ──(Q0, {})──(Q1, Δ01)──(Q2, Δ12)──▶      Δ = directionsBetween(previous, next)
+```
+
+- **A direction compares two snapshots,** so the stream has to *remember* the previous one. `scan` is a fold that emits each step: its accumulator is the last `PriceSnapshot`, and each new set of quotes becomes the next one.
+- **The first snapshot has nothing to compare with:** nothing moved, all flat.
+- **Why not `pairwise()`?** It waits for two values before emitting anything, so the market would be blank until the second tick.
+- **Why quotes and directions travel together:**
+  - two streams derived from the same ticker and recombined with `combineLatest` would arrive **one after the other**, the classic *glitch*:
+
+    ```
+    quotes:       ──Q1──────────▶
+    directions:   ────D1────────▶      (derived from quotes, one step later)
+    combineLatest ──(Q1,D0)─(Q1,D1)─▶  ✗ every tick emits twice, once with stale directions
+    ```
+  - one `scan` makes one snapshot per tick, and a test checks there's exactly one state per tick.
+
+---
+
+## 3. The search: `switchMap` + a timer
+
+`domain/pipeline/settled_query.dart`
+
+```
+typed:     ──"s"──"so"──"sol"──────────────""──────▶
+trim:      ──"s"──"so"──"sol"──────────────""──────▶
+switchMap: ──[t]──[t]───[t·········"sol"]──""──────▶    [t] = TimerStream(300 ms), cancelled by the next query
+distinct:  ─────────────────────"sol"──────""──────▶
+```
+
+- **Debounce:**
+  - `switchMap` switches to a fresh `TimerStream(query, 300 ms)` for every query and **cancels the previous one**;
+  - only a query that survives 300 ms of quiet comes out.
+- **An empty query (the field cleared) goes through at once:**
+  - `Stream.value("")` instead of a timer;
+  - it also cancels a query still waiting, so a cleared field never shows an old search 300 ms later.
+- **Why not `debounceTime`:** it can't treat one value differently from the others, and a separate "empty" stream merged back in would let a pending query arrive *after* the clear.
+- **`distinct`:** "sol" and " sol " are the same search, and recomputing the list for them would waste a frame.
+
+---
+
+## 4. The market: `combineLatest5`
+
+`domain/usecase/observe_market_use_case.dart`
+
+```
+snapshots: ──S0───────────────S1──────────────────S2─────▶   (§2, one per tick)
+query:     ──""─────────"sol"──────────────────────────────▶   (§3, settled)
+sort:      ──rank─────────────────────price───────────────▶   (distinct)
+settings:  ──(USD, live)─────────────────────────(EUR, live)─▶   (currency + pause, distinct)
+watchlist: ──{}────────────────────────────────────────────▶   (Phase 4)
+           ──────────────────────────────────────────────────
+listings:  ──L0─────────L1────L2──────L3──────────L4──L5─▶
+               every change of ANY input → buildMarketRows(the latest of each)
+```
+
+- **`combineLatest`, not `zip`:**
+  - `zip` pairs the *n-th* value of each input: the third tick with the third keystroke;
+  - `combineLatest` recomputes from the **latest** of every input whenever any one changes, which is what a derived list is.
+- **The first listing arrives at once:** `combineLatest` waits until every input has a value, and here they all do immediately:
+  - the ticker and the settings are `BehaviorSubject`s;
+  - the Cubit's query and sort are seeded subjects;
+  - the watchlist is `Stream.value({})` for now.
+- **Each input is narrowed and `distinct`:**
+  - the market takes only `(currency, paused)` from the settings, so a theme change never recomputes it;
+  - the same sort chosen again recomputes nothing.
+- **The combiner is pure:** `buildMarketRows(coins, quotes, query, sort, directions, watched)` filters (name or symbol, case and spaces ignored), sorts (ties by rank: a stable list between ticks) and marks each row's direction.
+- **The output carries its inputs** (`MarketListing`: the query, the sort, the currency and its rate, the pause). The screen therefore always shows the rows next to the query that produced them, never a newer query over older rows.
+
+---
+
+## 5. The price history: a bounded `scan`
+
+`core/prices/price_history.dart` + `domain/pipeline/price_history.dart`
+
+```
+quotes:  ──Q0──Q1──Q2── … ──Q60──Q61──▶
+scan:    ──[0]─[0,1]─[0,1,2]─ … ─[1…60]─[2…61]──▶     appendSnapshot(history, quotes), 60 per coin
+watch(btc): the current list at once, then each new one (distinct by identity)
+```
+
+- **A bounded buffer:** the accumulator is every coin's points. Each snapshot appends one per coin and drops the oldest past 60, so a long session never grows memory.
+- **Eager:** `PriceHistory` is an eager singleton that subscribes when the app starts. A coin's chart (Phase 4) has a minute of points the first time it opens.
+- **Immutable steps:**
+  - `appendSnapshot` returns new lists and never touches the old ones;
+  - an unchanged coin keeps its *same* list object, so `distinct(identical)` drops ticks that didn't touch it;
+  - a quote no newer than the last point (the same snapshot again) adds nothing.
+
+---
+
+## 6. Settings → the ticker: `switchMap`
+
+`core/prices/ticker_scheduler.dart` + `app/live_ticker.dart`
+
+```
+foreground: ──true────────────────────false────────true──────▶   (AppLifecycleListener: onShow / onHide)
+switchMap:    true → settings.map(period)   false → Stream.value(null)
+settings:   ──2 s──────1 s──(paused)──────(5 s)────────────────▶
+period:     ──2s───────1s───null────────null(bg)───null(paused)──▶
+distinct:   ──2s───────1s───null──────────────────────────────▶
+effect:       start(2s) start(1s) stop()
+```
+
+- **The decision is a stream; its effect is one `listen`:** `null` stops the ticker, a duration (re)starts it.
+- **`switchMap` on the foreground:**
+  - in the background the scheduler isn't listening to the settings at all;
+  - coming back, it switches to them again and gets their current value at once (a `BehaviorSubject`).
+- **`distinct`:** a currency change produces the same period and never restarts the timer.
+- **Paused is a setting, not an interval:**
+  - auto-updating content must be pausable (WCAG 2.2.2), so the Market's app bar has Pause / Resume;
+  - resuming returns to the interval the user chose.
+- **The widget does the lifecycle, the class does the deciding:** `LiveTicker` feeds `onHide` / `onShow` in, and `TickerScheduler` is tested without widgets. A brief `inactive` (the control centre) keeps prices moving.
+
+---
+
+## 7. Cubits: the bridge to the screen
+
+`features/market/cubit/market_cubit.dart`
+
+```
+MarketCubit
+  inputs:  _query  = BehaviorSubject.seeded("")      ← queryChanged(text), each keystroke
+           _sort   = BehaviorSubject.seeded(rank)    ← sortChanged(option)
+  load():  await the seed (a Future) → subscribe: ObserveMarketUseCase(seed, query: _query, sort: _sort)
+           each MarketListing → emit(MarketState.ready(listing))
+  close(): cancel the subscription, then close the inputs → nothing is emitted after close
+```
+
+- **The Cubit owns only its inputs and one subscription.** It never computes a row, and never keeps a price. It's the Dart counterpart of a ViewModel collecting a Flow into a `StateFlow`.
+- **Inputs are seeded subjects,** so the pipeline's first listing doesn't wait for a keystroke.
+- **Why a Cubit and not a Bloc:**
+  - the debounce is an operator *inside* the pipeline, on a stream combined with four others;
+  - Bloc's event transformers would add events around it without adding anything.
+
+### In the widgets
+
+- **`CoinRow` flashes on a new tick only:**
+  - it receives the quote's `updatedAt` as `tick` and flashes when that changes;
+  - a re-sort, a search or a currency change rebuilds the row with the same tick, and replays nothing;
+  - a paused market has no new ticks, so nothing flashes.
+- **`ValueKey(coin.id)` on rows:** a re-sort moves rows, and their flash state, instead of rebuilding them.
+- **Reduced motion:** with `MediaQuery.disableAnimationsOf`, no flash and no cross-fade. The arrow and the changing number still say what happened.
+
+---
+
+## Flow ↔ Combine ↔ Dart
+
+| Idea | Kotlin Flow (Android) | Combine (iOS) | **Dart / rxdart (this app)** |
+|---|---|---|---|
+| A value over time | `Flow<T>` | `Publisher` | `Stream<T>` |
+| One async answer | `suspend fun` | `async` / `Future` | `Future<T>` |
+| Current value + updates | `StateFlow` / `MutableStateFlow` | `CurrentValueSubject` | `BehaviorSubject` / `ValueStream` |
+| Events, no current value | `SharedFlow` | `PassthroughSubject` | `StreamController.broadcast()` / `PublishSubject` |
+| Combine latest values | `combine(a, b, …)` | `CombineLatest` / `combineLatest` | `Rx.combineLatest2…9` |
+| Pair n-th values | `zip` | `Zip` | `Rx.zip` |
+| Debounce | `debounce(300)` | `debounce(for:scheduler:)` | `debounceTime` (or `switchMap` + `TimerStream`, §3) |
+| Switch to the latest inner stream | `flatMapLatest` | `switchToLatest` | `switchMap` |
+| Running fold | `scan` / `runningFold` | `scan` | `scan` |
+| Drop repeats | `distinctUntilChanged` | `removeDuplicates` | `distinct` |
+| Transform | `map` | `map` | `map` |
+| Start with | `onStart { emit(x) }` | `prepend` | `startWith` |
+| Collect in the UI | `collectAsStateWithLifecycle` | `sink` + `@Observable` | a Cubit's `listen` → `emit` → `BlocBuilder` |
+| Cancel | `Job.cancel()` | `AnyCancellable.cancel()` | `StreamSubscription.cancel()` |
+| Test | Turbine (`awaitItem()`) | collected values | `StreamQueue` (`next`), `emitsInOrder`, `fakeAsync` |
+
+---
+
+## Testing the pipelines
+
+- **`StreamQueue` (package `async`), the Turbine of Dart:** `await queue.next` is the next value, in order. Used for the market pipeline and the price moves: each input changes, and the next listing is checked.
+- **Pure functions first:** `buildMarketRows`, `directionsBetween`, `appendSnapshot`, `RandomWalk` and the formatters are tested without any stream.
+- **Fake time (`fakeAsync`):**
+  - the ticker's intervals, the debounce's 300 ms and the Cubit's states are exact;
+  - the walk's randomness is seeded and the clock is the fake one, so every price path is reproducible.
+- **Two traps found while writing them** (conventions §11.122):
+  1. **Create everything inside `fakeAsync`.** A stream or timer created outside it doesn't run on its clock: a debounce test built its fakes in `setUp` and never saw its timer fire.
+  2. **Cancel futures from broadcast streams complete in the root zone,** which fake time never runs. rxdart's `switchMap` *waits* for the previous inner stream's `cancel()` before listening to the next. So in fake time:
+     - typing that replaces a pending query, or the scheduler switching from the settings to the background, stalls;
+     - a Cubit's `close()`, which awaits a cancel, never completes.
+
+     It's only the test clock: in the app the future completes at once. Those tests run in real time with a short debounce (40 ms). Widget tests alternate `tester.runAsync(pumpEventQueue)` with `tester.pump()`.
+- **Widget and app tests:**
+  - the app's own tests start with live prices **paused**: a ticking market never lets `pumpAndSettle` settle, and a periodic timer left running fails a test;
+  - a test that wants ticks turns them on and pauses before it ends;
+  - the accessibility tour checks the market **mid-flash**, so the contrast guideline runs over the real flash tints.
+
+---
+
+## Coming next
+
+- **Phase 4:** the watchlist (a drift `watch()` stream) becomes the market's fifth input; a coin's page combines its quote, its history, whether it's watched and the currency.
+- **Phase 5:** the portfolio: `combineLatest3(quotes, holdings, currency)` → the valuation, recomputed on every tick.

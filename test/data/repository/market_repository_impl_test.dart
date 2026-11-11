@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:crypto_tracker/core/common/app_exception.dart';
 import 'package:crypto_tracker/core/common/result.dart';
+import 'package:crypto_tracker/core/prices/price_ticker.dart';
+import 'package:crypto_tracker/core/prices/random_walk.dart';
 import 'package:crypto_tracker/data/repository/market_repository_impl.dart';
 import 'package:crypto_tracker/domain/model/market_seed.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,16 +16,22 @@ import '../../helpers/fixtures.dart';
 
 void main() {
   late ScriptedMarketApi api;
+  late PriceTicker ticker;
   late MarketRepositoryImpl repository;
 
+  PriceTicker newTicker() =>
+      PriceTicker(RandomWalk(Random(7)), Clock.fixed(testNow));
+
   setUp(() {
+    ticker = newTicker();
+    addTearDown(ticker.dispose);
     api = ScriptedMarketApi(
       coins: [
         coinDto(id: 'ethereum', symbol: 'eth', name: 'Ethereum', rank: 2),
         coinDto(),
       ],
     );
-    repository = MarketRepositoryImpl(api, Clock.fixed(testNow));
+    repository = MarketRepositoryImpl(api, Clock.fixed(testNow), ticker);
   });
 
   MarketSeed seedOf(Result<MarketSeed> result) => switch (result) {
@@ -41,6 +50,22 @@ void main() {
     expect(seed.quotes['bitcoin']!.priceUsd, 67240.5);
     expect(seed.quotes['bitcoin']!.updatedAt, testNow);
     expect(seed.rates, testRates);
+  });
+
+  test('the seed\'s quotes become the ticker\'s first snapshot', () async {
+    expect(ticker.quotes.hasValue, isFalse);
+
+    final seed = seedOf(await repository.loadMarket());
+
+    expect(ticker.quotes.value, seed.quotes);
+    expect(await repository.quotes.first, seed.quotes);
+  });
+
+  test('a failed load leaves the ticker unseeded', () async {
+    api.failure = const NetworkException();
+    await repository.loadMarket();
+
+    expect(ticker.quotes.hasValue, isFalse);
   });
 
   test('asks for the coins and the rates at the same time', () async {
@@ -124,7 +149,11 @@ void main() {
     // A sanity check that the empty sparkline itself is valid data…
     expect(await repository.loadMarket(), isA<Ok<MarketSeed>>());
 
-    final broken = MarketRepositoryImpl(_ErrorApi(), Clock.fixed(testNow));
+    final broken = MarketRepositoryImpl(
+      _ErrorApi(),
+      Clock.fixed(testNow),
+      newTicker(),
+    );
     await expectLater(broken.loadMarket(), throwsA(isA<StateError>()));
   });
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:crypto_tracker/core/common/app_exception.dart';
+import 'package:crypto_tracker/core/design_system/design_system.dart';
 import 'package:crypto_tracker/core/network/market_api.dart';
 import 'package:crypto_tracker/di/injection.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,7 @@ void main() {
         String location, {
         MarketApi? marketApi,
         bool settle = true,
+        bool livePrices = false,
       }) async {
         tester.platformDispatcher
           ..textScaleFactorTestValue = 2
@@ -33,6 +35,7 @@ void main() {
           initialLocation: location,
           marketApi: marketApi,
           settle: settle,
+          livePrices: livePrices,
         );
         // Phone width, but tall enough to lay out every item of a long
         // list: the checks see only what is built.
@@ -95,6 +98,25 @@ void main() {
         await tester.enterText(find.byType(TextField), 'zzz');
         await tester.pumpAndSettle();
         expect(find.text('No coins match “zzz”'), findsOneWidget);
+        await expectAccessible(tester);
+      });
+
+      testWidgets(
+        'Market, live, caught mid-flash (text over the flash tints)',
+        (tester) async {
+          await open(tester, '/market', livePrices: true, settle: false);
+          await tester.pump(const Duration(seconds: 1)); // the seed
+          await tester.pump(const Duration(seconds: 2)); // a tick
+          await tester.pump(const Duration(milliseconds: 50)); // flashing
+          expect(find.byType(PausedChip), findsNothing);
+          await expectAccessible(tester);
+          await tester.pauseMarket();
+        },
+      );
+
+      testWidgets('Market, paused', (tester) async {
+        await open(tester, '/market');
+        expect(find.byType(PausedChip), findsOneWidget);
         await expectAccessible(tester);
       });
 

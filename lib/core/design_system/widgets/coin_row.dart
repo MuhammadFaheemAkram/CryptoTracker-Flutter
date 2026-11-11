@@ -1,17 +1,21 @@
 import 'package:crypto_tracker/core/design_system/charts/sparkline.dart';
 import 'package:crypto_tracker/core/design_system/large_text.dart';
+import 'package:crypto_tracker/core/design_system/theme/app_colors.dart';
 import 'package:crypto_tracker/core/design_system/theme/app_spacing.dart';
 import 'package:crypto_tracker/core/design_system/widgets/coin_badge.dart';
 import 'package:crypto_tracker/core/design_system/widgets/price_change_badge.dart';
 import 'package:crypto_tracker/core/formatting/percent_formatter.dart';
+import 'package:crypto_tracker/domain/model/price_direction.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// One coin in a list (the Market, the Watchlist): badge, name, rank and
 /// symbol, an optional 7-day sparkline, the price and its 24 h change.
 ///
 /// It only renders: the caller formats [price] (in the chosen currency) and
-/// decides what a tap does. Later phases add the flash when the price ticks
-/// (Phase 3) and the watchlist star (Phase 4, as [trailing]).
+/// decides what a tap does. When the price ticks ([tick] changes), the row
+/// **flashes** green or red ([direction]) and fades back, and the price
+/// cross-fades to its new value. Phase 4 adds the watchlist star (as
+/// [trailing]).
 ///
 /// The rank sits with the symbol ("#1 · BTC") rather than in a column of its
 /// own: on a phone, a rank column, the sparkline, the price and the star
@@ -29,6 +33,8 @@ class CoinRow extends StatelessWidget {
     required this.price,
     required this.change24hPercent,
     this.sparkline,
+    this.direction = PriceDirection.flat,
+    this.tick,
     this.onTap,
     this.trailing,
   });
@@ -48,6 +54,15 @@ class CoinRow extends StatelessWidget {
   /// on very narrow rows.
   final List<double>? sparkline;
 
+  /// Which way the price moved on its last tick: the color of the flash.
+  final PriceDirection direction;
+
+  /// Identifies the price's last tick (its time). The row flashes when this
+  /// changes, so a rebuild for any other reason (a re-sort, a search, a
+  /// currency change) never replays a flash, and a paused market, whose
+  /// ticks stop, never flashes (Correctness Rule 4).
+  final Object? tick;
+
   final VoidCallback? onTap;
 
   /// A control at the end of the row (the watchlist star).
@@ -60,35 +75,133 @@ class CoinRow extends StatelessWidget {
         '$name, $upperSymbol, rank $rank, $price, '
         '${PercentFormatter.describeChange(change24hPercent)}';
     final trailing = this.trailing;
-    return Row(
-      children: [
-        Expanded(
-          // One node with one label and one tap: the InkWell's own
-          // semantics are replaced, not doubled.
-          child: Semantics(
-            button: onTap != null,
-            label: label,
-            onTap: onTap,
-            excludeSemantics: true,
-            child: InkWell(
+    return _Flash(
+      direction: direction,
+      tick: tick,
+      child: Row(
+        children: [
+          Expanded(
+            // One node with one label and one tap: the InkWell's own
+            // semantics are replaced, not doubled.
+            child: Semantics(
+              button: onTap != null,
+              label: label,
               onTap: onTap,
-              excludeFromSemantics: true,
-              child: Padding(
-                padding: EdgeInsetsDirectional.only(
-                  start: AppSpacing.medium,
-                  end: trailing == null ? AppSpacing.medium : 0,
-                  top: AppSpacing.small,
-                  bottom: AppSpacing.small,
+              excludeSemantics: true,
+              child: InkWell(
+                onTap: onTap,
+                excludeFromSemantics: true,
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    start: AppSpacing.medium,
+                    end: trailing == null ? AppSpacing.medium : 0,
+                    top: AppSpacing.small,
+                    bottom: AppSpacing.small,
+                  ),
+                  child: context.prefersStackedLayout
+                      ? _Stacked(row: this, symbol: upperSymbol)
+                      : _SideBySide(row: this, symbol: upperSymbol),
                 ),
-                child: context.prefersStackedLayout
-                    ? _Stacked(row: this, symbol: upperSymbol)
-                    : _SideBySide(row: this, symbol: upperSymbol),
               ),
             ),
           ),
-        ),
-        ?trailing,
-      ],
+          ?trailing,
+        ],
+      ),
+    );
+  }
+}
+
+/// The row's background: a tint of the up or down color for a moment after
+/// a tick, fading back to nothing over [duration].
+///
+/// `Ink`, not a `ColoredBox`: the ripple of a tap paints on the same
+/// `Material`, so it stays visible over the tint. Off when the platform
+/// asks for reduced motion: then nothing flashes, and the arrow and the
+/// changing number still say what happened.
+class _Flash extends StatefulWidget {
+  const _Flash({
+    required this.direction,
+    required this.tick,
+    required this.child,
+  });
+
+  final PriceDirection direction;
+  final Object? tick;
+  final Widget child;
+
+  static const duration = Duration(milliseconds: 600);
+
+  @override
+  State<_Flash> createState() => _FlashState();
+}
+
+class _FlashState extends State<_Flash> with SingleTickerProviderStateMixin {
+  late final _fade = AnimationController(
+    vsync: this,
+    duration: _Flash.duration,
+    value: 1, // faded out: the first build doesn't flash
+  );
+
+  @override
+  void didUpdateWidget(_Flash old) {
+    super.didUpdateWidget(old);
+    if (widget.tick != old.tick &&
+        widget.direction != PriceDirection.flat &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _fade.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fade.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final tint = switch (widget.direction) {
+      PriceDirection.up => colors.upFlash,
+      PriceDirection.down => colors.downFlash,
+      PriceDirection.flat => null,
+    };
+    return AnimatedBuilder(
+      animation: _fade,
+      builder: (context, child) => Ink(
+        color: tint == null || _fade.isCompleted
+            ? null
+            : Color.lerp(tint, tint.withValues(alpha: 0), _fade.value),
+        child: child,
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+/// The price, cross-fading to each new value (instantly with reduced
+/// motion), both values aligned on [alignment] while they overlap.
+class _Price extends StatelessWidget {
+  const _Price(
+    this.price, {
+    required this.style,
+    this.alignment = AlignmentDirectional.centerEnd,
+  });
+
+  final String price;
+  final TextStyle? style;
+  final AlignmentDirectional alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 250),
+      layoutBuilder: (current, previous) =>
+          Stack(alignment: alignment, children: [...previous, ?current]),
+      child: Text(price, key: ValueKey(price), style: _tabular(style)),
     );
   }
 }
@@ -135,7 +248,7 @@ class _SideBySide extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(row.price, style: _tabular(theme.textTheme.titleMedium)),
+              _Price(row.price, style: theme.textTheme.titleMedium),
               PriceChangeBadge(
                 percent: row.change24hPercent,
                 style: theme.textTheme.bodySmall,
@@ -189,7 +302,14 @@ class _Stacked extends StatelessWidget {
             children: [
               Text(row.name, style: theme.textTheme.titleMedium),
               _RankAndSymbol(row: row, symbol: symbol),
-              Text(row.price, style: _tabular(theme.textTheme.titleMedium)),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: _Price(
+                  row.price,
+                  style: theme.textTheme.titleMedium,
+                  alignment: AlignmentDirectional.centerStart,
+                ),
+              ),
               PriceChangeBadge(
                 percent: row.change24hPercent,
                 style: theme.textTheme.bodySmall,

@@ -1,5 +1,4 @@
-import 'package:crypto_tracker/domain/model/market_coin.dart';
-import 'package:crypto_tracker/domain/model/sort_option.dart';
+import 'package:crypto_tracker/domain/model/market_listing.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'market_state.freezed.dart';
@@ -15,11 +14,8 @@ sealed class MarketState with _$MarketState {
   /// "Try again".
   const factory MarketState.error(String message) = MarketError;
 
-  /// The list, as [query] and [sort] derive it. [rows] is empty when
-  /// nothing matches the query (the seed itself is never empty).
-  const factory MarketState.ready({
-    required List<MarketCoin> rows,
-    required String query,
-    required SortOption sort,
-  }) = MarketReady;
+  /// The live market, as the pipeline last derived it: the rows, and the
+  /// query, sort, currency and pause that shaped them. Its rows are empty
+  /// when nothing matches the query.
+  const factory MarketState.ready(MarketListing listing) = MarketReady;
 }

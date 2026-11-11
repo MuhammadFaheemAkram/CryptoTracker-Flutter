@@ -1,5 +1,8 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:crypto_tracker/core/design_system/design_system.dart';
+import 'package:crypto_tracker/domain/model/currency.dart';
+import 'package:crypto_tracker/domain/model/market_listing.dart';
+import 'package:crypto_tracker/domain/model/price_direction.dart';
 import 'package:crypto_tracker/domain/model/sort_option.dart';
 import 'package:crypto_tracker/domain/pipeline/market_rows.dart';
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart';
@@ -23,19 +26,31 @@ void main() {
     cubit = _MockMarketCubit();
     opened = [];
     when(() => cubit.load()).thenAnswer((_) async {});
+    when(() => cubit.setPaused(paused: any(named: 'paused')))
+        .thenAnswer((_) async {});
   });
 
-  MarketState ready({String query = '', SortOption sort = SortOption.rank}) {
+  MarketState ready({
+    String query = '',
+    SortOption sort = SortOption.rank,
+    Currency currency = Currency.usd,
+    bool paused = false,
+  }) {
     final market = smallMarket();
     return MarketState.ready(
-      rows: buildMarketRows(
-        coins: market.coins,
-        quotes: market.quotes,
-        query: query,
+      MarketListing(
+        rows: buildMarketRows(
+          coins: market.coins,
+          quotes: market.quotes,
+          query: query.trim(),
+          sort: sort,
+        ),
+        query: query.trim(),
         sort: sort,
+        currency: currency,
+        rate: market.rates.rateFor(currency),
+        isPaused: paused,
       ),
-      query: query,
-      sort: sort,
     );
   }
 
@@ -140,6 +155,79 @@ void main() {
     await tester.tap(find.text('24h change'));
     await tester.pumpAndSettle();
     verify(() => cubit.sortChanged(SortOption.change24h)).called(1);
+  });
+
+  testWidgets('prices are in the listing\'s currency, at its rate', (
+    tester,
+  ) async {
+    await show(tester, ready(currency: Currency.eur));
+
+    expect(find.text('€61,861.26'), findsOneWidget); // $67,240.50 × 0.92
+  });
+
+  testWidgets('live: a Pause button, and no Paused chip', (tester) async {
+    await show(tester, ready());
+
+    expect(find.byType(PausedChip), findsNothing);
+    await tester.tap(find.byTooltip('Pause live prices'));
+
+    verify(() => cubit.setPaused(paused: true)).called(1);
+  });
+
+  testWidgets('paused: the chip says so, and the button resumes', (
+    tester,
+  ) async {
+    await show(tester, ready(paused: true));
+
+    expect(find.byType(PausedChip), findsOneWidget);
+    await tester.tap(find.byTooltip('Resume live prices'));
+
+    verify(() => cubit.setPaused(paused: false)).called(1);
+  });
+
+  testWidgets('no pause button before the market is loaded', (tester) async {
+    await show(tester, const MarketState.loading());
+
+    expect(find.byTooltip('Pause live prices'), findsNothing);
+  });
+
+  testWidgets('each row gets its direction and its tick (the quote\'s time), '
+      'which is what makes it flash', (tester) async {
+    final market = smallMarket();
+    final moved = {
+      ...market.quotes,
+      'bitcoin': market.quotes['bitcoin']!.copyWith(
+        priceUsd: 70000,
+        updatedAt: testNow.add(const Duration(seconds: 2)),
+      ),
+    };
+    await show(
+      tester,
+      MarketState.ready(
+        MarketListing(
+          rows: buildMarketRows(
+            coins: market.coins,
+            quotes: moved,
+            directions: const {'bitcoin': PriceDirection.up},
+          ),
+          query: '',
+          sort: SortOption.rank,
+          currency: Currency.usd,
+          rate: 1,
+          isPaused: false,
+        ),
+      ),
+    );
+
+    final bitcoin = tester.widget<CoinRow>(
+      find.widgetWithText(CoinRow, 'Bitcoin'),
+    );
+    expect(bitcoin.direction, PriceDirection.up);
+    expect(bitcoin.tick, moved['bitcoin']!.updatedAt);
+    final ethereum = tester.widget<CoinRow>(
+      find.widgetWithText(CoinRow, 'Ethereum'),
+    );
+    expect(ethereum.direction, PriceDirection.flat);
   });
 
   testWidgets('tapping a coin opens it', (tester) async {

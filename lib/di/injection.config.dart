@@ -10,48 +10,118 @@
 
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 
+import 'dart:math' as _i407;
+
 import 'package:clock/clock.dart' as _i454;
 import 'package:crypto_tracker/core/network/asset_json_loader.dart' as _i223;
 import 'package:crypto_tracker/core/network/fake_market_api.dart' as _i771;
 import 'package:crypto_tracker/core/network/market_api.dart' as _i253;
+import 'package:crypto_tracker/core/prices/price_history.dart' as _i469;
+import 'package:crypto_tracker/core/prices/price_ticker.dart' as _i611;
+import 'package:crypto_tracker/core/prices/random_walk.dart' as _i607;
+import 'package:crypto_tracker/core/prices/ticker_scheduler.dart' as _i501;
+import 'package:crypto_tracker/core/storage/settings_local_data_source.dart'
+    as _i406;
 import 'package:crypto_tracker/data/repository/market_repository_impl.dart'
     as _i434;
+import 'package:crypto_tracker/data/repository/settings_repository_impl.dart'
+    as _i937;
 import 'package:crypto_tracker/di/app_module.dart' as _i799;
 import 'package:crypto_tracker/domain/repository/market_repository.dart'
     as _i847;
+import 'package:crypto_tracker/domain/repository/settings_repository.dart'
+    as _i782;
 import 'package:crypto_tracker/domain/usecase/load_market_use_case.dart'
     as _i54;
+import 'package:crypto_tracker/domain/usecase/observe_market_use_case.dart'
+    as _i524;
+import 'package:crypto_tracker/domain/usecase/observe_price_moves_use_case.dart'
+    as _i128;
+import 'package:crypto_tracker/domain/usecase/settings_use_cases.dart' as _i13;
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart'
     as _i428;
 import 'package:flutter/services.dart' as _i281;
 import 'package:get_it/get_it.dart' as _i174;
 import 'package:injectable/injectable.dart' as _i526;
+import 'package:shared_preferences/shared_preferences.dart' as _i460;
 
 extension GetItInjectableX on _i174.GetIt {
   // initializes the registration of main-scope dependencies inside of GetIt
-  _i174.GetIt init({
+  Future<_i174.GetIt> init({
     String? environment,
     _i526.EnvironmentFilter? environmentFilter,
-  }) {
+  }) async {
     final gh = _i526.GetItHelper(this, environment, environmentFilter);
     final appModule = _$AppModule();
     gh.lazySingleton<_i454.Clock>(() => appModule.clock);
+    gh.lazySingleton<_i407.Random>(() => appModule.random);
     gh.lazySingleton<_i281.AssetBundle>(() => appModule.assetBundle);
+    await gh.lazySingletonAsync<_i460.SharedPreferencesWithCache>(
+      () => appModule.preferences,
+      preResolve: true,
+    );
+    gh.lazySingleton<_i607.RandomWalk>(
+      () => _i607.RandomWalk(gh<_i407.Random>()),
+    );
+    gh.lazySingleton<_i611.PriceTicker>(
+      () => _i611.PriceTicker(gh<_i607.RandomWalk>(), gh<_i454.Clock>()),
+      dispose: (i) => i.dispose(),
+    );
+    gh.lazySingleton<_i406.SettingsLocalDataSource>(
+      () =>
+          _i406.SettingsLocalDataSource(gh<_i460.SharedPreferencesWithCache>()),
+    );
+    gh.singleton<_i469.PriceHistory>(
+      () => _i469.PriceHistory(gh<_i611.PriceTicker>()),
+      dispose: (i) => i.dispose(),
+    );
     gh.lazySingleton<_i223.AssetJsonLoader>(
       () => _i223.AssetJsonLoader(gh<_i281.AssetBundle>()),
+    );
+    gh.lazySingleton<_i782.SettingsRepository>(
+      () => _i937.SettingsRepositoryImpl(gh<_i406.SettingsLocalDataSource>()),
     );
     gh.lazySingleton<_i253.MarketApi>(
       () => _i771.FakeMarketApi(gh<_i223.AssetJsonLoader>()),
     );
+    gh.lazySingleton<_i501.TickerScheduler>(
+      () => _i501.TickerScheduler(
+        gh<_i611.PriceTicker>(),
+        gh<_i782.SettingsRepository>(),
+      ),
+      dispose: (i) => i.dispose(),
+    );
+    gh.factory<_i13.ObserveSettingsUseCase>(
+      () => _i13.ObserveSettingsUseCase(gh<_i782.SettingsRepository>()),
+    );
+    gh.factory<_i13.SetLivePricesPausedUseCase>(
+      () => _i13.SetLivePricesPausedUseCase(gh<_i782.SettingsRepository>()),
+    );
     gh.lazySingleton<_i847.MarketRepository>(
-      () =>
-          _i434.MarketRepositoryImpl(gh<_i253.MarketApi>(), gh<_i454.Clock>()),
+      () => _i434.MarketRepositoryImpl(
+        gh<_i253.MarketApi>(),
+        gh<_i454.Clock>(),
+        gh<_i611.PriceTicker>(),
+      ),
     );
     gh.factory<_i54.LoadMarketUseCase>(
       () => _i54.LoadMarketUseCase(gh<_i847.MarketRepository>()),
     );
+    gh.factory<_i128.ObservePriceMovesUseCase>(
+      () => _i128.ObservePriceMovesUseCase(gh<_i847.MarketRepository>()),
+    );
+    gh.factory<_i524.ObserveMarketUseCase>(
+      () => _i524.ObserveMarketUseCase(
+        gh<_i128.ObservePriceMovesUseCase>(),
+        gh<_i782.SettingsRepository>(),
+      ),
+    );
     gh.factory<_i428.MarketCubit>(
-      () => _i428.MarketCubit(gh<_i54.LoadMarketUseCase>()),
+      () => _i428.MarketCubit(
+        gh<_i54.LoadMarketUseCase>(),
+        gh<_i524.ObserveMarketUseCase>(),
+        gh<_i13.SetLivePricesPausedUseCase>(),
+      ),
     );
     return this;
   }
