@@ -22,14 +22,25 @@ import 'test_dependencies.dart';
 ///   one, for the error and loading states).
 /// - With [settle] false it pumps a few frames instead of settling: a
 ///   spinner that never stops would never settle.
+/// - [stored] are preferences from an earlier session (raw keys).
 Future<void> pumpCryptoTracker(
   WidgetTester tester, {
   String? initialLocation,
   MarketApi? marketApi,
   bool livePrices = false,
   bool settle = true,
+  Map<String, String> stored = const {},
 }) async {
   await tester.runAsync(() async {
+    // Settings stored by an earlier session (raw keys, as the data source
+    // names them): the app must start with them.
+    for (final MapEntry(:key, :value) in stored.entries) {
+      await SharedPreferencesAsyncPlatform.instance!.setString(
+        key,
+        value,
+        const SharedPreferencesOptions(),
+      );
+    }
     if (!livePrices) {
       // Stored before the app reads its settings: it starts paused, as if
       // the user had paused it last time.

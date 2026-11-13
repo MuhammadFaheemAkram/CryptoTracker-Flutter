@@ -5,14 +5,29 @@ import 'package:crypto_tracker/core/database/app_database.dart';
 import 'package:crypto_tracker/core/database/daos/portfolio_dao.dart';
 import 'package:crypto_tracker/core/database/daos/watchlist_dao.dart';
 import 'package:crypto_tracker/core/storage/settings_local_data_source.dart';
+import 'package:crypto_tracker/domain/model/app_info.dart';
 import 'package:flutter/services.dart';
 import 'package:injectable/injectable.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Third-party types the app's classes depend on, which can't carry
 /// `injectable` annotations themselves.
 @module
 abstract class AppModule {
+  /// The app's name and version (Settings → About), read before the first
+  /// frame like the preferences: it never changes while the app runs.
+  @preResolve
+  @lazySingleton
+  Future<AppInfo> get appInfo async {
+    final info = await PackageInfo.fromPlatform();
+    return AppInfo(
+      name: info.appName,
+      version: info.version,
+      buildNumber: info.buildNumber,
+    );
+  }
+
   /// "Now" for every timestamp. Tests replace it with a fixed clock.
   @lazySingleton
   Clock get clock => const Clock();

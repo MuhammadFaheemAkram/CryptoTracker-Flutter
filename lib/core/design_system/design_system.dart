@@ -14,6 +14,7 @@ export 'package:crypto_tracker/core/design_system/widgets/app_search_field.dart'
 export 'package:crypto_tracker/core/design_system/widgets/app_snack_bar.dart';
 export 'package:crypto_tracker/core/design_system/widgets/coin_badge.dart';
 export 'package:crypto_tracker/core/design_system/widgets/coin_row.dart';
+export 'package:crypto_tracker/core/design_system/widgets/currency_picker.dart';
 export 'package:crypto_tracker/core/design_system/widgets/empty_state_view.dart';
 export 'package:crypto_tracker/core/design_system/widgets/error_view.dart';
 export 'package:crypto_tracker/core/design_system/widgets/loading_view.dart';

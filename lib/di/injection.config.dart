@@ -34,6 +34,7 @@ import 'package:crypto_tracker/data/repository/settings_repository_impl.dart'
 import 'package:crypto_tracker/data/repository/watchlist_repository_impl.dart'
     as _i34;
 import 'package:crypto_tracker/di/app_module.dart' as _i799;
+import 'package:crypto_tracker/domain/model/app_info.dart' as _i70;
 import 'package:crypto_tracker/domain/repository/market_repository.dart'
     as _i847;
 import 'package:crypto_tracker/domain/repository/portfolio_repository.dart'
@@ -69,6 +70,8 @@ import 'package:crypto_tracker/features/market/cubit/market_cubit.dart'
     as _i428;
 import 'package:crypto_tracker/features/portfolio/cubit/portfolio_cubit.dart'
     as _i651;
+import 'package:crypto_tracker/features/settings/cubit/settings_cubit.dart'
+    as _i749;
 import 'package:crypto_tracker/features/watchlist/cubit/watchlist_cubit.dart'
     as _i137;
 import 'package:flutter/services.dart' as _i281;
@@ -84,6 +87,10 @@ extension GetItInjectableX on _i174.GetIt {
   }) async {
     final gh = _i526.GetItHelper(this, environment, environmentFilter);
     final appModule = _$AppModule();
+    await gh.lazySingletonAsync<_i70.AppInfo>(
+      () => appModule.appInfo,
+      preResolve: true,
+    );
     gh.lazySingleton<_i454.Clock>(() => appModule.clock);
     gh.lazySingleton<_i407.Random>(() => appModule.random);
     gh.lazySingleton<_i36.AppDatabase>(() => appModule.database);
@@ -144,6 +151,15 @@ extension GetItInjectableX on _i174.GetIt {
     gh.factory<_i13.SetLivePricesPausedUseCase>(
       () => _i13.SetLivePricesPausedUseCase(gh<_i782.SettingsRepository>()),
     );
+    gh.factory<_i13.UpdateCurrencyUseCase>(
+      () => _i13.UpdateCurrencyUseCase(gh<_i782.SettingsRepository>()),
+    );
+    gh.factory<_i13.UpdateIntervalUseCase>(
+      () => _i13.UpdateIntervalUseCase(gh<_i782.SettingsRepository>()),
+    );
+    gh.factory<_i13.UpdateThemeUseCase>(
+      () => _i13.UpdateThemeUseCase(gh<_i782.SettingsRepository>()),
+    );
     gh.lazySingleton<_i847.MarketRepository>(
       () => _i434.MarketRepositoryImpl(
         gh<_i253.MarketApi>(),
@@ -188,6 +204,17 @@ extension GetItInjectableX on _i174.GetIt {
         gh<_i585.WatchlistRepository>(),
         gh<_i782.SettingsRepository>(),
       ),
+    );
+    gh.lazySingleton<_i749.SettingsCubit>(
+      () => _i749.SettingsCubit(
+        gh<_i13.CurrentSettingsUseCase>(),
+        gh<_i13.ObserveSettingsUseCase>(),
+        gh<_i13.UpdateCurrencyUseCase>(),
+        gh<_i13.UpdateIntervalUseCase>(),
+        gh<_i13.UpdateThemeUseCase>(),
+        gh<_i13.SetLivePricesPausedUseCase>(),
+      ),
+      dispose: (i) => i.close(),
     );
     gh.factory<_i524.ObserveMarketUseCase>(
       () => _i524.ObserveMarketUseCase(

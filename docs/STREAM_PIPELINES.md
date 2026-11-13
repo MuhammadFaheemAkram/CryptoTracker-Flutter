@@ -4,7 +4,7 @@ How CryptoTracker uses Dart streams: every pipeline in the app, drawn as a marbl
 
 This is the Flutter counterpart of the Android edition's `FLOW_PIPELINES.md` (Kotlin Flow) and the iOS edition's `COMBINE_PIPELINES.md` (Combine). The [operator table](#flow--combine--dart) at the end maps the three.
 
-> **Version 3 (Phase 5):** the ticker, price moves, the search, the market, the price history and highs, the settings driving the ticker, the watchlist (a drift query as a stream), a coin's page, **the portfolio's live valuation** and **the holding form's price (`switchMap` on the chosen coin)**.
+> **Final (Phase 6):** the ticker, price moves, the search, the market, the price history and highs, the settings driving the ticker, the watchlist (a drift query as a stream), a coin's page, the portfolio's live valuation, the holding form's price, and **the settings feeding every pipeline**.
 
 ---
 
@@ -339,6 +339,29 @@ form:         "worth now" = amount × the latest price
 
 ---
 
+## 12. The settings: one stream, every pipeline
+
+`domain/pipeline/price_display.dart` + `features/settings/cubit/settings_cubit.dart`
+
+```
+Settings tab / the Market's Pause ─ update ─▶ SettingsRepository (a BehaviorSubject, then the disk)
+                                                     │ watch()
+          ┌──────────────────────────────────────────┼────────────────────────────┐
+  priceDisplay(): (currency, paused) ─ distinct      │                   SettingsCubit (themeMode)
+          │                                          │                            │ BlocSelector
+  Market · Watchlist · a coin · Portfolio    TickerScheduler (§6)          MaterialApp.themeMode
+```
+
+- **One source, three kinds of listener:**
+  - the price pipelines take `(currency, paused)` through `priceDisplay()`, `distinct`: a theme change never recomputes a list;
+  - the scheduler takes the period (or nothing, if paused);
+  - the app takes the theme mode through a `BlocSelector`: a currency change never rebuilds `MaterialApp`.
+- **From the first frame:** the preferences open before `runApp`, and `SettingsCubit` starts from `repository.current` (synchronous) before it listens, so the first build has the theme and the first listing the currency.
+- **A write is read back like any change:** the Settings tab never updates itself. The Live prices switch and the Market's Pause write the same setting, and each shows it from the stream.
+- **No new stream code for Settings:** every pipeline already took the settings as an input (the market since Phase 3, the others from the day they were written); Phase 6 only added the controls.
+
+---
+
 ## Flow ↔ Combine ↔ Dart
 
 | Idea | Kotlin Flow (Android) | Combine (iOS) | **Dart / rxdart (this app)** |
@@ -389,6 +412,6 @@ form:         "worth now" = amount × the latest price
 
 ---
 
-## Coming next
+## Beyond this project
 
-- **Phase 6:** Settings (currency, interval, appearance), whose writes flow through `priceDisplay()` into every pipeline above with no new stream code.
+A real price feed would replace only the ticker's timer behind the same `quotes` stream; price alerts would be one more `scan` over it. More in the [roadmap](ROADMAP.md).

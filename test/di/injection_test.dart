@@ -12,6 +12,7 @@ import 'package:crypto_tracker/data/repository/portfolio_repository_impl.dart';
 import 'package:crypto_tracker/data/repository/settings_repository_impl.dart';
 import 'package:crypto_tracker/data/repository/watchlist_repository_impl.dart';
 import 'package:crypto_tracker/di/injection.dart';
+import 'package:crypto_tracker/domain/model/app_info.dart';
 import 'package:crypto_tracker/domain/model/market_seed.dart';
 import 'package:crypto_tracker/domain/repository/market_repository.dart';
 import 'package:crypto_tracker/domain/repository/portfolio_repository.dart';
@@ -20,6 +21,7 @@ import 'package:crypto_tracker/domain/repository/watchlist_repository.dart';
 import 'package:crypto_tracker/features/coin_detail/cubit/coin_detail_cubit.dart';
 import 'package:crypto_tracker/features/holding_form/cubit/holding_form_cubit.dart';
 import 'package:crypto_tracker/features/market/cubit/market_cubit.dart';
+import 'package:crypto_tracker/features/settings/cubit/settings_cubit.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../helpers/test_dependencies.dart';
@@ -37,6 +39,13 @@ void main() {
     expect(getIt<SettingsRepository>(), isA<SettingsRepositoryImpl>());
     expect(getIt<WatchlistRepository>(), isA<WatchlistRepositoryImpl>());
     expect(getIt<PortfolioRepository>(), isA<PortfolioRepositoryImpl>());
+  });
+
+  test('one SettingsCubit for the whole app (the theme, and the Settings '
+      'tab), and the app\'s name and version read at launch', () {
+    expect(getIt<SettingsCubit>(), same(getIt<SettingsCubit>()));
+    expect(getIt<AppInfo>().name, 'CryptoTracker');
+    expect(getIt<AppInfo>().version, '1.0.0');
   });
 
   test('one database for the whole app, and its DAO comes from it', () {
